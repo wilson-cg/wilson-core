@@ -19,7 +19,17 @@ type Question = {
   id: string;
   question: string;
   answer: string;
-  fieldType: "TEXT" | "LONGTEXT" | "URL" | "NUMBER";
+  fieldType:
+    | "TEXT"
+    | "LONGTEXT"
+    | "URL"
+    | "NUMBER"
+    | "SINGLE_CHOICE"
+    | "MULTI_CHOICE";
+  options: string[] | null;
+  minSelections: number | null;
+  maxSelections: number | null;
+  required: boolean;
 };
 
 export function TypeformOnboarding({
@@ -47,16 +57,18 @@ export function TypeformOnboarding({
   const current = questions[index];
   const answered = Object.values(answers).filter((a) => a.trim().length > 0)
     .length;
+  const isChoice =
+    current?.fieldType === "SINGLE_CHOICE" ||
+    current?.fieldType === "MULTI_CHOICE";
 
-  // Focus the textarea when changing questions
+  // Focus the textarea when changing free-text questions (skip for choice)
   useEffect(() => {
-    if (textareaRef.current) {
+    if (textareaRef.current && !isChoice) {
       textareaRef.current.focus();
-      // Move cursor to end for prefilled answers
       const len = textareaRef.current.value.length;
       textareaRef.current.setSelectionRange(len, len);
     }
-  }, [index]);
+  }, [index, isChoice]);
 
   function saveAndAdvance(direction: 1 | -1) {
     if (!current) return;
@@ -177,16 +189,15 @@ export function TypeformOnboarding({
             {current.question}
           </h1>
 
-          <textarea
-            ref={textareaRef}
+          <QuestionInput
+            current={current}
             value={answers[current.id] ?? ""}
-            onChange={(e) =>
-              setAnswers((a) => ({ ...a, [current.id]: e.target.value }))
+            onChange={(v) =>
+              setAnswers((a) => ({ ...a, [current.id]: v }))
             }
-            onKeyDown={handleKey}
-            rows={4}
-            placeholder="Type your answer here…"
-            className="mt-8 w-full resize-none rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-virgil)] px-4 py-3 text-base leading-relaxed text-[var(--color-charcoal)] placeholder:text-[var(--color-muted-foreground)] shadow-[var(--shadow-soft)] focus:border-[var(--color-lime)] focus:outline-none focus:ring-2 focus:ring-[var(--color-lime)]/50 md:text-lg"
+            onSubmit={() => saveAndAdvance(1)}
+            textareaRef={textareaRef}
+            handleKey={handleKey}
           />
 
           <div className="mt-6 flex items-center justify-between">
@@ -201,7 +212,11 @@ export function TypeformOnboarding({
                 <ArrowLeft className="h-3.5 w-3.5" /> Back
               </Button>
               <span className="hidden text-[11px] opacity-60 md:inline">
-                Press Enter to continue · Shift+Enter for newline
+                {isChoice
+                  ? current.fieldType === "MULTI_CHOICE"
+                    ? `Pick ${current.minSelections ?? 1}–${current.maxSelections ?? "any"} options`
+                    : "Pick one"
+                  : "Press Enter to continue · Shift+Enter for newline"}
               </span>
             </div>
             <Button
@@ -226,6 +241,135 @@ export function TypeformOnboarding({
         </div>
       </main>
     </div>
+  );
+}
+
+/* ─── Question input (branches on fieldType) ───────────────── */
+
+function QuestionInput({
+  current,
+  value,
+  onChange,
+  onSubmit,
+  textareaRef,
+  handleKey,
+}: {
+  current: Question;
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  handleKey: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+}) {
+  if (current.fieldType === "SINGLE_CHOICE" && current.options) {
+    return (
+      <div className="mt-8 space-y-2">
+        {current.options.map((opt, i) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => {
+              onChange(opt);
+              // Auto-advance on selection — feels like Typeform
+              setTimeout(onSubmit, 150);
+            }}
+            className={`group flex w-full items-center gap-3 rounded-[var(--radius-md)] border px-4 py-3 text-left text-base transition-all ${
+              value === opt
+                ? "border-[var(--color-lime)] bg-[var(--color-virgil)] text-[var(--color-charcoal)] shadow-[var(--shadow-card)]"
+                : "border-[var(--color-border)] bg-[var(--color-virgil)] text-[var(--color-charcoal)] hover:border-[var(--color-lime)]/60 hover:shadow-[var(--shadow-soft)]"
+            }`}
+          >
+            <ChoiceLetter letter={String.fromCharCode(65 + i)} selected={value === opt} />
+            <span className="flex-1">{opt}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  if (current.fieldType === "MULTI_CHOICE" && current.options) {
+    let selected: string[] = [];
+    try {
+      selected = value ? (JSON.parse(value) as string[]) : [];
+      if (!Array.isArray(selected)) selected = [];
+    } catch {
+      selected = [];
+    }
+    const toggle = (opt: string) => {
+      const isSelected = selected.includes(opt);
+      const next = isSelected
+        ? selected.filter((s) => s !== opt)
+        : [...selected, opt];
+      // Enforce max
+      if (
+        current.maxSelections &&
+        next.length > current.maxSelections
+      ) {
+        return;
+      }
+      onChange(JSON.stringify(next));
+    };
+    return (
+      <div className="mt-8 space-y-2">
+        {current.options.map((opt, i) => {
+          const isSelected = selected.includes(opt);
+          return (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => toggle(opt)}
+              className={`group flex w-full items-center gap-3 rounded-[var(--radius-md)] border px-4 py-3 text-left text-base transition-all ${
+                isSelected
+                  ? "border-[var(--color-lime)] bg-[var(--color-virgil)] text-[var(--color-charcoal)] shadow-[var(--shadow-card)]"
+                  : "border-[var(--color-border)] bg-[var(--color-virgil)] text-[var(--color-charcoal)] hover:border-[var(--color-lime)]/60 hover:shadow-[var(--shadow-soft)]"
+              }`}
+            >
+              <ChoiceLetter
+                letter={String.fromCharCode(65 + i)}
+                selected={isSelected}
+              />
+              <span className="flex-1">{opt}</span>
+              {isSelected ? (
+                <Check className="h-4 w-4 text-[var(--color-forest)]" />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Free text (default)
+  return (
+    <textarea
+      ref={textareaRef}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={handleKey}
+      rows={4}
+      placeholder="Type your answer here…"
+      className="mt-8 w-full resize-none rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-virgil)] px-4 py-3 text-base leading-relaxed text-[var(--color-charcoal)] placeholder:text-[var(--color-muted-foreground)] shadow-[var(--shadow-soft)] focus:border-[var(--color-lime)] focus:outline-none focus:ring-2 focus:ring-[var(--color-lime)]/50 md:text-lg"
+    />
+  );
+}
+
+function ChoiceLetter({
+  letter,
+  selected,
+}: {
+  letter: string;
+  selected: boolean;
+}) {
+  return (
+    <span
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded text-[11px] font-semibold ${
+        selected
+          ? "bg-[var(--color-forest)] text-[var(--color-lime)]"
+          : "bg-[var(--color-virgil-dark)] text-[var(--color-charcoal-500)]"
+      }`}
+    >
+      {letter}
+    </span>
   );
 }
 

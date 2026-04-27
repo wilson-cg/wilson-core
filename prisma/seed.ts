@@ -16,6 +16,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { DEFAULT_ONBOARDING_QUESTIONS } from "../lib/default-onboarding";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -213,45 +214,45 @@ async function main() {
   ]);
 
   console.log("🎓 Creating onboarding questionnaires…");
-  await seedOnboarding(condor.id, [
-    [
-      "What's your one-sentence value proposition?",
-      "We help mid-market B2B SaaS leaders turn ops from firefighting into the engine that scales the business.",
-    ],
-    ["Who is your ideal customer?", "B2B SaaS COOs and VP-Ops at 200–2000 employees, post-Series B."],
-    ["Top 3 content pillars?", "1) Ops as a growth function. 2) Cross-functional ops design. 3) The next-gen ops org chart."],
-    ["Tone of voice — describe in 3 words.", "Operator. Direct. Earned."],
-    ["Words / phrases to avoid?", "'leveraging', 'synergy', 'hope this finds you well', any salesy openers."],
-    ["What does success look like in 90 days?", "12 qualified meetings booked, 3 closed-won, +2k LinkedIn followers, 30% reply rate."],
-    ["Current LinkedIn presence (followers, post cadence)?", "8.4k followers, posting twice a week. Engagement 2-4% on most posts."],
-    ["Primary CTA goal?", "Meetings — the ops community already exists, we want intros into specific companies."],
-    ["3-5 example dream prospects?", null],
-    ["Competitors to position against?", null],
-  ]);
-  await seedOnboarding(clearlake.id, [
-    ["What's your one-sentence value proposition?", "Series A capital + a real partner who's been in the founder seat."],
-    ["Who is your ideal customer?", "Founders raising Series A in B2B vertical SaaS, $1-3M ARR."],
-    ["Top 3 content pillars?", "1) What we underwrite vs what we back. 2) Founder mental models. 3) Series A diligence transparency."],
-    ["Tone of voice — describe in 3 words.", "Honest. Curious. Disciplined."],
-    ["Words / phrases to avoid?", "VC-speak, 'thesis', 'unicorn', anything that sounds like a fund deck."],
-    ["What does success look like in 90 days?", "20 founder calls booked. 2 term sheets out. Top-of-funnel quality up."],
-    ["Current LinkedIn presence (followers, post cadence)?", null],
-    ["Primary CTA goal?", "Founder calls."],
-    ["3-5 example dream prospects?", null],
-    ["Competitors to position against?", null],
-  ]);
-  await seedOnboarding(rook.id, [
-    ["What's your one-sentence value proposition?", null],
-    ["Who is your ideal customer?", "DTC brand founders / CMOs at $10-100M revenue."],
-    ["Top 3 content pillars?", "1) Brand-first thinking. 2) Copy as the conversion lever. 3) Category design."],
-    ["Tone of voice — describe in 3 words.", "Crafted. Playful. Sharp."],
-    ["Words / phrases to avoid?", null],
-    ["What does success look like in 90 days?", null],
-    ["Current LinkedIn presence (followers, post cadence)?", null],
-    ["Primary CTA goal?", null],
-    ["3-5 example dream prospects?", null],
-    ["Competitors to position against?", null],
-  ]);
+  // Each workspace gets the canonical 10-question set. Sample answers
+  // demonstrate the "completed" state for some questions. Indexed by the
+  // question's position in DEFAULT_ONBOARDING_QUESTIONS (0-based).
+  await seedOnboarding(condor.id, {
+    0: "We help mid-market B2B SaaS leaders turn ops from firefighting into the engine that scales the business.",
+    1: "Currently working with Helix Biosciences (rebuilt their ops onboarding), Northbridge Capital (pipeline reporting), and Fulcrum Systems (ops org redesign).",
+    2: "B2B SaaS COOs and VP-Ops at 200–2000 employees, post-Series B, scaling ops function from firefighting to strategic.",
+    3: "\"We're spending too much time fixing the same problems and not enough time stopping them happening.\"",
+    4: "Hired a generalist ops manager who couldn't handle the systems work. Tried tooling-led fixes (Asana, ClickUp) that papered over the org problem.",
+    5: "1) Designing cross-functional ops orgs that don't break at scale. 2) Translating CFO/CEO ops asks into shippable systems. 3) Hiring + comp for ops leaders.",
+    6: "Ops people should report to the CEO, not the COO. Most companies get this wrong by burying ops two layers deep.",
+    7: "1) When do I hire my first ops person? 2) What's the difference between a COO and a Head of Ops? 3) How do I measure ops productivity? 4) Should ops own customer success?",
+    8: JSON.stringify(["Direct", "Operator-led", "Educational", "Authoritative"]),
+    9: "Mostly comfortable, selective",
+  });
+  await seedOnboarding(clearlake.id, {
+    0: "Series A capital and a real partner who's been in the founder seat. We back B2B SaaS founders post-PMF, $1-3M ARR.",
+    1: "Recent investments: Ansible Bio (lead Series A), Orchard OS (participated). Earlier: Stagecoach, Halevine, Northpoint.",
+    2: "Founders raising Series A in B2B vertical SaaS, $1-3M ARR, 6-12 months from product-market fit signal.",
+    3: "\"I need a partner who's actually been in this seat, not someone who'll add me to a 50-portfolio mailing list.\"",
+    4: "Tier-1 funds that gave them money but no time. Or angels who couldn't help with hiring + go-to-market.",
+    5: "1) Founder vetting under uncertainty. 2) The 12-month pre-Series-B operating cadence. 3) Hiring the first VP Sales.",
+    6: null,
+    7: "1) How do you decide between two co-founders' visions? 2) When is the right time to raise Series B? 3) What's your portfolio support model?",
+    8: JSON.stringify(["Direct", "Authoritative", "Personal"]),
+    9: "Mostly comfortable, selective",
+  });
+  await seedOnboarding(rook.id, {
+    0: null,
+    1: "Maison Brook (rebrand), Otterwood (campaign refresh), Common Thread (positioning).",
+    2: "DTC brand founders / CMOs at $10-100M revenue, owner-operators or close to them, brand-first not growth-hack.",
+    3: null,
+    4: null,
+    5: "1) Category design and positioning. 2) Voice + copy systems for DTC. 3) Knowing when to spend on brand vs performance.",
+    6: "Most DTC brands optimize their funnel before they have a brand worth optimizing. The bucket has a leak at the top.",
+    7: null,
+    8: JSON.stringify(["Creative", "Playful", "Personal", "Direct"]),
+    9: "Fully comfortable, no limits",
+  });
 
   console.log("🔗 Creating memberships…");
 
@@ -1115,16 +1116,23 @@ async function seedContacts(workspaceId: string, contacts: ContactSeed[]) {
 
 async function seedOnboarding(
   workspaceId: string,
-  rows: [string, string | null][]
+  answersByIndex: Record<number, string | null>
 ) {
-  for (let i = 0; i < rows.length; i++) {
-    const [question, answer] = rows[i];
+  // Use the same default question set as createClient so every workspace
+  // (seeded or freshly created) starts with the same canonical questions.
+  for (let i = 0; i < DEFAULT_ONBOARDING_QUESTIONS.length; i++) {
+    const q = DEFAULT_ONBOARDING_QUESTIONS[i];
+    const answer = answersByIndex[i] ?? null;
     await db.onboardingResponse.create({
       data: {
         workspaceId,
-        question,
+        question: q.question,
         answer: answer ?? undefined,
-        fieldType: "LONGTEXT",
+        fieldType: q.fieldType,
+        options: q.options ? q.options.join("|") : undefined,
+        minSelections: q.minSelections ?? undefined,
+        maxSelections: q.maxSelections ?? undefined,
+        required: q.required ?? false,
         orderIndex: i,
       },
     });

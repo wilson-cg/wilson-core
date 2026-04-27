@@ -16,7 +16,17 @@ export type OnboardingRow = {
   id: string;
   question: string;
   answer: string | null;
-  fieldType: "TEXT" | "LONGTEXT" | "URL" | "NUMBER";
+  fieldType:
+    | "TEXT"
+    | "LONGTEXT"
+    | "URL"
+    | "NUMBER"
+    | "SINGLE_CHOICE"
+    | "MULTI_CHOICE";
+  options: string | null;
+  minSelections: number | null;
+  maxSelections: number | null;
+  required: boolean;
   orderIndex: number;
 };
 
@@ -170,9 +180,15 @@ function OnboardingRowView({
           <button
             type="button"
             onClick={() => setEditingQuestion(true)}
-            className="group flex w-full items-start gap-1 text-left text-xs font-medium text-[var(--color-charcoal)] hover:text-[var(--color-forest)]"
+            className="group flex w-full items-start gap-1.5 text-left text-xs font-medium text-[var(--color-charcoal)] hover:text-[var(--color-forest)]"
           >
-            <span className="flex-1">{row.question}</span>
+            <span className="flex-1">
+              {row.question}
+              {row.required ? (
+                <span className="ml-1 text-[var(--color-raspberry)]">*</span>
+              ) : null}
+            </span>
+            <FieldTypeBadge type={row.fieldType} />
             <Pencil className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
         )}
@@ -208,6 +224,22 @@ function AnswerCell({ slug, row }: { slug: string; row: OnboardingRow }) {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const empty = !row.answer || row.answer.trim().length === 0;
 
+  // Choice questions are answered via the typeform — show read-only summary
+  // (decoded for MULTI_CHOICE) so the spreadsheet stays scannable.
+  if (row.fieldType === "SINGLE_CHOICE" || row.fieldType === "MULTI_CHOICE") {
+    return (
+      <div className={`p-3 ${empty ? "bg-[var(--color-bee)]/10" : ""}`}>
+        {empty ? (
+          <span className="text-xs italic text-[var(--color-muted-foreground)]">
+            Awaiting answer via the share link
+          </span>
+        ) : (
+          <ChoiceAnswerDisplay row={row} />
+        )}
+      </div>
+    );
+  }
+
   return (
     <form
       action={updateOnboardingAnswer}
@@ -236,6 +268,53 @@ function AnswerCell({ slug, row }: { slug: string; row: OnboardingRow }) {
   );
 }
 
+function ChoiceAnswerDisplay({ row }: { row: OnboardingRow }) {
+  if (row.fieldType === "SINGLE_CHOICE") {
+    return (
+      <span className="inline-flex rounded-full bg-[var(--color-lime)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-forest-950)]">
+        {row.answer}
+      </span>
+    );
+  }
+  // MULTI_CHOICE — answer is a JSON array of strings
+  let picks: string[] = [];
+  try {
+    picks = row.answer ? (JSON.parse(row.answer) as string[]) : [];
+    if (!Array.isArray(picks)) picks = [];
+  } catch {
+    picks = [];
+  }
+  if (picks.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {picks.map((p) => (
+        <span
+          key={p}
+          className="inline-flex rounded-full bg-[var(--color-forest-100)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-forest-900)]"
+        >
+          {p}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function FieldTypeBadge({ type }: { type: OnboardingRow["fieldType"] }) {
+  const label = {
+    TEXT: "Text",
+    LONGTEXT: "Long text",
+    URL: "URL",
+    NUMBER: "Number",
+    SINGLE_CHOICE: "Single choice",
+    MULTI_CHOICE: "Multi-choice",
+  }[type];
+  return (
+    <span className="shrink-0 rounded-full bg-[var(--color-virgil-dark)] px-1.5 py-px text-[9px] font-medium uppercase tracking-wider text-[var(--color-charcoal-500)]">
+      {label}
+    </span>
+  );
+}
+
 /* ─── New question form ─────────────────────────────────────── */
 
 function NewQuestionForm({
@@ -245,27 +324,117 @@ function NewQuestionForm({
   slug: string;
   onClose: () => void;
 }) {
+  const [fieldType, setFieldType] = useState<
+    "TEXT" | "LONGTEXT" | "URL" | "NUMBER" | "SINGLE_CHOICE" | "MULTI_CHOICE"
+  >("LONGTEXT");
+  const isChoice =
+    fieldType === "SINGLE_CHOICE" || fieldType === "MULTI_CHOICE";
+  const isMulti = fieldType === "MULTI_CHOICE";
+
   return (
     <form
       action={addOnboardingQuestion}
       onSubmit={() => onClose()}
-      className="mb-4 flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-forest-300)] bg-[var(--color-forest-100)]/40 p-3"
+      className="mb-4 space-y-3 rounded-[var(--radius-md)] border border-[var(--color-forest-300)] bg-[var(--color-forest-100)]/40 p-3"
     >
       <input type="hidden" name="workspaceSlug" value={slug} />
-      <Input
-        name="question"
-        placeholder="What's your one-sentence value proposition?"
-        required
-        minLength={2}
-        autoFocus
-        className="flex-1"
-      />
-      <Button type="submit" variant="accent" size="sm">
-        Add
-      </Button>
-      <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-        Cancel
-      </Button>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          name="question"
+          placeholder="Pick your top traits you want to come through on LinkedIn."
+          required
+          minLength={2}
+          autoFocus
+          className="min-w-[16rem] flex-1"
+        />
+        <select
+          name="fieldType"
+          value={fieldType}
+          onChange={(e) =>
+            setFieldType(e.target.value as typeof fieldType)
+          }
+          className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 text-xs shadow-[var(--shadow-soft)]"
+          title="Question type"
+        >
+          <option value="LONGTEXT">Long text</option>
+          <option value="TEXT">Short text</option>
+          <option value="URL">URL</option>
+          <option value="NUMBER">Number</option>
+          <option value="SINGLE_CHOICE">Single choice</option>
+          <option value="MULTI_CHOICE">Multi-choice</option>
+        </select>
+        <label className="inline-flex items-center gap-1.5 text-xs text-[var(--color-charcoal-500)]">
+          <input
+            type="checkbox"
+            name="required"
+            className="accent-[var(--color-forest)]"
+          />
+          Required
+        </label>
+      </div>
+
+      {isChoice ? (
+        <div className="space-y-2">
+          <label className="block">
+            <span className="block text-[11px] font-medium text-[var(--color-charcoal-500)]">
+              Options{" "}
+              <span className="text-[var(--color-muted-foreground)]">
+                (one per line)
+              </span>
+            </span>
+            <textarea
+              name="options"
+              rows={5}
+              required
+              placeholder={
+                isMulti
+                  ? "Direct\nOpinionated\nWarm\nFunny\nAuthoritative"
+                  : "Fully comfortable, no limits\nMostly comfortable, selective\nComfortable with professional stories, not personal\nUncomfortable with personal content"
+              }
+              className="mt-1 w-full rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2 py-1.5 text-xs shadow-[var(--shadow-soft)]"
+            />
+          </label>
+
+          {isMulti ? (
+            <div className="grid grid-cols-2 gap-2">
+              <label className="space-y-1">
+                <span className="block text-[11px] font-medium text-[var(--color-charcoal-500)]">
+                  Minimum selections
+                </span>
+                <Input
+                  type="number"
+                  name="minSelections"
+                  min={0}
+                  defaultValue={3}
+                  className="h-8 text-xs"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[11px] font-medium text-[var(--color-charcoal-500)]">
+                  Maximum selections
+                </span>
+                <Input
+                  type="number"
+                  name="maxSelections"
+                  min={1}
+                  defaultValue={5}
+                  className="h-8 text-xs"
+                />
+              </label>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="flex items-center gap-2">
+        <Button type="submit" variant="accent" size="sm">
+          Add question
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
     </form>
   );
 }

@@ -35,6 +35,10 @@ export default async function PublicOnboardingPage({
         question: q.question,
         answer: q.answer ?? "",
         fieldType: q.fieldType,
+        options: q.options ? q.options.split("|") : null,
+        minSelections: q.minSelections,
+        maxSelections: q.maxSelections,
+        required: q.required,
       }))}
     />
   );

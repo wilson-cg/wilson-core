@@ -398,9 +398,19 @@ model OnboardingResponse {
   id            String                @id @default(cuid())
   workspaceId   String
   question      String
+  // For TEXT/LONGTEXT/URL/NUMBER: plain string. For SINGLE_CHOICE: the
+  // selected option label. For MULTI_CHOICE: a JSON array of selected
+  // option labels (e.g. ["Direct","Warm","Funny"]).
   answer        String?
   fieldType     OnboardingFieldType   @default(LONGTEXT)
+  // Pipe-separated list of options for SINGLE_CHOICE / MULTI_CHOICE.
+  // Null for free-text fields.
+  options       String?
+  // For MULTI_CHOICE — minimum / maximum number of selectable options.
+  minSelections Int?
+  maxSelections Int?
   orderIndex    Int                   @default(0)
+  required      Boolean               @default(false)
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
 
@@ -414,4 +424,6 @@ enum OnboardingFieldType {
   LONGTEXT
   URL
   NUMBER
+  SINGLE_CHOICE
+  MULTI_CHOICE
 }

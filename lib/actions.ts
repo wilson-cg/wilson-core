@@ -486,28 +486,16 @@ export async function markMeetingBooked(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
+import { DEFAULT_ONBOARDING_QUESTIONS } from "./default-onboarding";
+
 /* ─── Create new client workspace ───────────────────────────── */
 
 const createClientSchema = z.object({
   name: z.string().min(2, "Client name must be at least 2 characters"),
 });
 
-/**
- * Default onboarding questions seeded for every new client. They can edit /
- * delete / reorder these from the settings page.
- */
-const DEFAULT_ONBOARDING_QUESTIONS = [
-  "What's your one-sentence value proposition?",
-  "Who is your ideal customer?",
-  "Top 3 content pillars?",
-  "Tone of voice — describe in 3 words.",
-  "Words / phrases to avoid?",
-  "What does success look like in 90 days?",
-  "Current LinkedIn presence (followers, post cadence)?",
-  "Primary CTA goal?",
-  "3-5 example dream prospects?",
-  "Competitors to position against?",
-];
+// Default onboarding questions live in lib/default-onboarding.ts so the
+// seed script + this server action share a single source of truth.
 
 function slugify(name: string): string {
   return name
@@ -552,8 +540,12 @@ export async function createClient(formData: FormData) {
       onboardingToken: generateOnboardingToken(),
       onboarding: {
         create: DEFAULT_ONBOARDING_QUESTIONS.map((q, i) => ({
-          question: q,
-          fieldType: "LONGTEXT",
+          question: q.question,
+          fieldType: q.fieldType,
+          options: q.options ? q.options.join("|") : null,
+          minSelections: q.minSelections ?? null,
+          maxSelections: q.maxSelections ?? null,
+          required: q.required ?? false,
           orderIndex: i,
         })),
       },
@@ -846,16 +838,55 @@ async function syncPrimaryContactName(workspaceId: string) {
 const onboardingQuestionSchema = z.object({
   workspaceSlug: z.string().min(1),
   question: z.string().min(2),
-  fieldType: z.enum(["TEXT", "LONGTEXT", "URL", "NUMBER"]).default("LONGTEXT"),
+  fieldType: z
+    .enum(["TEXT", "LONGTEXT", "URL", "NUMBER", "SINGLE_CHOICE", "MULTI_CHOICE"])
+    .default("LONGTEXT"),
+  options: z.string().optional(), // newline- or pipe-separated
+  minSelections: z.coerce.number().int().min(0).optional(),
+  maxSelections: z.coerce.number().int().min(0).optional(),
+  required: z.boolean().optional(),
 });
+
+/**
+ * Normalize options input — supports both newline-separated (textarea
+ * style) and pipe-separated input. Returns the canonical pipe-separated
+ * form we store, or null if there are no options for this field type.
+ */
+function normalizeOptions(
+  fieldType: string,
+  raw: string | undefined
+): string | null {
+  if (fieldType !== "SINGLE_CHOICE" && fieldType !== "MULTI_CHOICE") {
+    return null;
+  }
+  if (!raw) return null;
+  const opts = raw
+    .split(/[\n|]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return opts.length > 0 ? opts.join("|") : null;
+}
 
 export async function addOnboardingQuestion(formData: FormData) {
   const parsed = onboardingQuestionSchema.parse({
     workspaceSlug: formData.get("workspaceSlug"),
     question: formData.get("question"),
     fieldType: (formData.get("fieldType") as string | null) || "LONGTEXT",
+    options: formData.get("options") || undefined,
+    minSelections: formData.get("minSelections") || undefined,
+    maxSelections: formData.get("maxSelections") || undefined,
+    required: formData.get("required") === "on",
   });
   const { workspace } = await requireWorkspaceWriteAccess(parsed.workspaceSlug);
+
+  const isChoice =
+    parsed.fieldType === "SINGLE_CHOICE" ||
+    parsed.fieldType === "MULTI_CHOICE";
+
+  const options = normalizeOptions(parsed.fieldType, parsed.options);
+  if (isChoice && !options) {
+    throw new Error("Choice questions need at least one option");
+  }
 
   const max = await prisma.onboardingResponse.aggregate({
     where: { workspaceId: workspace.id },
@@ -867,6 +898,16 @@ export async function addOnboardingQuestion(formData: FormData) {
       workspaceId: workspace.id,
       question: parsed.question,
       fieldType: parsed.fieldType,
+      options,
+      minSelections:
+        parsed.fieldType === "MULTI_CHOICE"
+          ? parsed.minSelections ?? null
+          : null,
+      maxSelections:
+        parsed.fieldType === "MULTI_CHOICE"
+          ? parsed.maxSelections ?? null
+          : null,
+      required: parsed.required ?? false,
       orderIndex: (max._max.orderIndex ?? -1) + 1,
     },
   });
@@ -909,6 +950,13 @@ const updateQuestionSchema = z.object({
   workspaceSlug: z.string().min(1),
   responseId: z.string().min(1),
   question: z.string().min(2),
+  fieldType: z
+    .enum(["TEXT", "LONGTEXT", "URL", "NUMBER", "SINGLE_CHOICE", "MULTI_CHOICE"])
+    .optional(),
+  options: z.string().optional(),
+  minSelections: z.coerce.number().int().min(0).optional(),
+  maxSelections: z.coerce.number().int().min(0).optional(),
+  required: z.boolean().optional(),
 });
 
 export async function updateOnboardingQuestion(formData: FormData) {
@@ -916,6 +964,11 @@ export async function updateOnboardingQuestion(formData: FormData) {
     workspaceSlug: formData.get("workspaceSlug"),
     responseId: formData.get("responseId"),
     question: formData.get("question"),
+    fieldType: (formData.get("fieldType") as string | null) || undefined,
+    options: formData.get("options") || undefined,
+    minSelections: formData.get("minSelections") || undefined,
+    maxSelections: formData.get("maxSelections") || undefined,
+    required: formData.get("required") === "on",
   });
   const { workspace } = await requireWorkspaceWriteAccess(parsed.workspaceSlug);
 
@@ -926,9 +979,36 @@ export async function updateOnboardingQuestion(formData: FormData) {
     throw new Error("Onboarding row not found");
   }
 
+  // Build update payload — only touch the fields that came through
+  const data: Record<string, unknown> = { question: parsed.question };
+
+  if (parsed.fieldType) {
+    const isChoice =
+      parsed.fieldType === "SINGLE_CHOICE" ||
+      parsed.fieldType === "MULTI_CHOICE";
+    const options = normalizeOptions(parsed.fieldType, parsed.options);
+    if (isChoice && !options) {
+      throw new Error("Choice questions need at least one option");
+    }
+    data.fieldType = parsed.fieldType;
+    data.options = options;
+    data.minSelections =
+      parsed.fieldType === "MULTI_CHOICE"
+        ? parsed.minSelections ?? null
+        : null;
+    data.maxSelections =
+      parsed.fieldType === "MULTI_CHOICE"
+        ? parsed.maxSelections ?? null
+        : null;
+  }
+
+  if (formData.has("required")) {
+    data.required = parsed.required ?? false;
+  }
+
   await prisma.onboardingResponse.update({
     where: { id: parsed.responseId },
-    data: { question: parsed.question },
+    data,
   });
 
   revalidatePath(`/dashboard/workspaces/${workspace.slug}`);
