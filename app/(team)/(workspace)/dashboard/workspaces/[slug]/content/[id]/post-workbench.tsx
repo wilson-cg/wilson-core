@@ -10,6 +10,7 @@ import { LinkedInPreview } from "@/components/post/linkedin-preview";
 import { WritingMetrics } from "@/components/post/writing-metrics";
 import { ImprovementsSidebar } from "@/components/post/improvements-sidebar";
 import { useUnsavedGuard } from "@/components/post/use-unsaved-guard";
+import { useToast } from "@/components/ui/toast";
 import {
   updatePostDraft,
   submitPostForApproval,
@@ -38,6 +39,7 @@ type Props = {
  * directly from the inner forms / async handlers.
  */
 export function PostWorkbench(props: Props) {
+  const { toast, confirm } = useToast();
   const [body, setBody] = useState(props.initialBody);
   const [title, setTitle] = useState(props.initialTitle);
   const [media, setMedia] = useState<EditorMedia[]>(
@@ -82,7 +84,7 @@ export function PostWorkbench(props: Props) {
     } catch (e) {
       console.error(e);
       setMedia((m) => m.filter((x) => x.tempId !== tempId));
-      alert(e instanceof Error ? e.message : "Failed to attach image");
+      toast.error(e instanceof Error ? e.message : "Failed to attach image");
     }
   }
 
@@ -101,7 +103,7 @@ export function PostWorkbench(props: Props) {
     } catch (e) {
       console.error(e);
       setMedia(prev);
-      alert(e instanceof Error ? e.message : "Failed to remove image");
+      toast.error(e instanceof Error ? e.message : "Failed to remove image");
     }
   }
 
@@ -117,34 +119,41 @@ export function PostWorkbench(props: Props) {
         // Snapshot the saved state so dirty turns false until next edit
         setLastSavedBody(body);
         setLastSavedTitle(title);
+        toast.success("Draft saved");
       } catch (e) {
         console.error(e);
-        alert(e instanceof Error ? e.message : "Save failed");
+        toast.error(e instanceof Error ? e.message : "Save failed");
       }
     });
   }
 
-  function submitForApproval() {
-    if (
-      !confirm(
-        "Submit this post to the client for approval? They'll get a notification."
-      )
-    ) {
-      return;
-    }
+  async function submitForApproval() {
+    const ok = await confirm({
+      title: `Submit to ${props.contactName} for approval?`,
+      description: `${props.contactName} will get a notification with this post to approve, edit, or reject.`,
+      confirmLabel: "Submit for approval",
+      cancelLabel: "Not yet",
+    });
+    if (!ok) return;
     startSubmit(async () => {
-      // Save first to make sure latest body is persisted
-      const saveFd = new FormData();
-      saveFd.set("postId", props.postId);
-      saveFd.set("title", title);
-      saveFd.set("body", body);
-      await updatePostDraft(saveFd);
-      setLastSavedBody(body);
-      setLastSavedTitle(title);
+      try {
+        // Save first to make sure latest body is persisted
+        const saveFd = new FormData();
+        saveFd.set("postId", props.postId);
+        saveFd.set("title", title);
+        saveFd.set("body", body);
+        await updatePostDraft(saveFd);
+        setLastSavedBody(body);
+        setLastSavedTitle(title);
 
-      const fd = new FormData();
-      fd.set("postId", props.postId);
-      await submitPostForApproval(fd);
+        const fd = new FormData();
+        fd.set("postId", props.postId);
+        await submitPostForApproval(fd);
+        toast.success(`Sent to ${props.contactName} for approval`);
+      } catch (e) {
+        console.error(e);
+        toast.error(e instanceof Error ? e.message : "Couldn't submit");
+      }
     });
   }
 

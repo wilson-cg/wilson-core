@@ -11,6 +11,7 @@ import { LinkedInPreview } from "@/components/post/linkedin-preview";
 import { WritingMetrics } from "@/components/post/writing-metrics";
 import { ImprovementsSidebar } from "@/components/post/improvements-sidebar";
 import { useUnsavedGuard } from "@/components/post/use-unsaved-guard";
+import { useToast } from "@/components/ui/toast";
 import { draftPost } from "@/lib/actions";
 
 /**
@@ -32,6 +33,7 @@ type Props = {
 };
 
 export function NewPostWorkbench(props: Props) {
+  const { toast } = useToast();
   const [body, setBody] = useState("");
   const [title, setTitle] = useState("");
   const [media, setMedia] = useState<EditorMedia[]>([]);
@@ -68,7 +70,7 @@ export function NewPostWorkbench(props: Props) {
 
   function saveDraft() {
     if (body.trim().length < 10) {
-      alert("Add at least 10 characters before saving the draft.");
+      toast.info("Add at least 10 characters before saving the draft.");
       return;
     }
     setSavingNow(true); // suppress the unsaved-guard for the redirect

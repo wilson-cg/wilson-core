@@ -12,6 +12,7 @@ import {
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 
 /**
  * Card-style post editor. Replaces the plain textarea on post pages.
@@ -77,6 +78,7 @@ export function PostEditor({
   placeholder?: string;
   minHeight?: number;
 }) {
+  const { toast } = useToast();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -131,11 +133,11 @@ export function PostEditor({
     if (!files || files.length === 0) return;
     const file = files[0];
     if (!file.type.startsWith("image/")) {
-      alert("Only image files are supported (PNG, JPEG, GIF, WEBP).");
+      toast.error("Only image files are supported (PNG, JPEG, GIF, WEBP).");
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      alert("Max 2MB per image. Compress before uploading.");
+      toast.error("Max 2MB per image. Compress before uploading.");
       return;
     }
     const reader = new FileReader();
