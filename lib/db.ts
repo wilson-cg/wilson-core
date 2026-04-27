@@ -28,20 +28,37 @@ function createPrisma(): PrismaClient {
   return new PrismaClient({ adapter });
 }
 
+// Module-level cache — guarantees one client per process in production
+// (Next.js dev's HMR is what globalForPrisma protects against).
+let _client: PrismaClient | undefined;
+
 function getOrCreate(): PrismaClient {
-  if (globalForPrisma.prisma) return globalForPrisma.prisma;
-  const client = createPrisma();
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = client;
+  if (_client) return _client;
+  if (globalForPrisma.prisma) {
+    _client = globalForPrisma.prisma;
+    return _client;
   }
-  return client;
+  _client = createPrisma();
+  // Cache in BOTH production and dev. Without this, every property access
+  // through the Proxy below would spawn a fresh PrismaClient (and a fresh
+  // pg Pool). That breaks $transaction with P2028 "Transaction not found"
+  // because the transaction is opened on one client but internal state
+  // checks land on a different client. Connection-pool exhaustion is the
+  // other symptom.
+  globalForPrisma.prisma = _client;
+  return _client;
 }
 
 // Lazy proxy — only creates the client (and validates DATABASE_URL) on
 // first property access, not at module import. This lets Next.js's build
-// step traverse the file without needing the env var.
+// step traverse the file without needing the env var. After the first
+// access, every call returns the same cached PrismaClient.
 export const prisma = new Proxy({} as PrismaClient, {
-  get(_target, prop, receiver) {
-    return Reflect.get(getOrCreate(), prop, receiver);
+  get(_target, prop) {
+    const client = getOrCreate();
+    const value = Reflect.get(client, prop);
+    // Bind methods to the real client so `this` is correct inside Prisma
+    // (especially for $transaction, which captures `this` for engine state).
+    return typeof value === "function" ? value.bind(client) : value;
   },
 });
