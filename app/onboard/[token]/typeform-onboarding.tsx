@@ -2,7 +2,6 @@
 
 import { useState, useTransition, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Wordmark } from "@/components/brand/wordmark";
 import { ArrowRight, ArrowLeft, Check } from "lucide-react";
 import { submitOnboardingByToken } from "@/lib/actions";
 
@@ -143,9 +142,14 @@ export function TypeformOnboarding({
             <div className="text-sm font-medium leading-tight">
               {workspaceName}
             </div>
-            <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider opacity-70">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider opacity-70">
               powered by
-              <Wordmark tone="virgil" className="h-2.5" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/wilsons-wordmark-light.svg"
+                alt="Wilson's"
+                className="h-3.5"
+              />
             </div>
           </div>
         </div>
@@ -182,7 +186,7 @@ export function TypeformOnboarding({
             onKeyDown={handleKey}
             rows={4}
             placeholder="Type your answer here…"
-            className="mt-8 w-full resize-none rounded-[var(--radius-md)] border border-white/20 bg-white/5 px-4 py-3 text-base leading-relaxed text-[var(--color-virgil)] placeholder:text-[var(--color-virgil)]/40 focus:border-[var(--color-lime)] focus:outline-none focus:ring-2 focus:ring-[var(--color-lime)]/50 md:text-lg"
+            className="mt-8 w-full resize-none rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-virgil)] px-4 py-3 text-base leading-relaxed text-[var(--color-charcoal)] placeholder:text-[var(--color-muted-foreground)] shadow-[var(--shadow-soft)] focus:border-[var(--color-lime)] focus:outline-none focus:ring-2 focus:ring-[var(--color-lime)]/50 md:text-lg"
           />
 
           <div className="mt-6 flex items-center justify-between">
@@ -274,7 +278,12 @@ function Completion({
               {workspaceName.charAt(0).toUpperCase()}
             </div>
           )}
-          <Wordmark tone="virgil" className="h-7" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/wilsons-wordmark-light.svg"
+            alt="Wilson's"
+            className="h-9"
+          />
         </div>
 
         <p className="mt-12 text-[11px] opacity-50">
