@@ -9,6 +9,7 @@ import { PostEditor, type EditorMedia } from "@/components/post/post-editor";
 import { LinkedInPreview } from "@/components/post/linkedin-preview";
 import { WritingMetrics } from "@/components/post/writing-metrics";
 import { ImprovementsSidebar } from "@/components/post/improvements-sidebar";
+import { useUnsavedGuard } from "@/components/post/use-unsaved-guard";
 import {
   updatePostDraft,
   submitPostForApproval,
@@ -51,6 +52,18 @@ export function PostWorkbench(props: Props) {
   const [savePending, startSave] = useTransition();
   const [submitPending, startSubmit] = useTransition();
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // "Dirty" if the user has changed body or title vs whatever was last
+  // persisted. Media changes flush instantly so they don't count.
+  const [lastSavedBody, setLastSavedBody] = useState(props.initialBody);
+  const [lastSavedTitle, setLastSavedTitle] = useState(props.initialTitle);
+  const dirty =
+    props.canEdit && (body !== lastSavedBody || title !== lastSavedTitle);
+
+  useUnsavedGuard(
+    dirty,
+    "You have unsaved changes. Leave anyway? Click Cancel and use Save draft to keep your work."
+  );
 
   async function handleAddMedia(file: File, dataUrl: string) {
     // Optimistic
@@ -101,6 +114,9 @@ export function PostWorkbench(props: Props) {
       try {
         await updatePostDraft(fd);
         setSavedAt(Date.now());
+        // Snapshot the saved state so dirty turns false until next edit
+        setLastSavedBody(body);
+        setLastSavedTitle(title);
       } catch (e) {
         console.error(e);
         alert(e instanceof Error ? e.message : "Save failed");
@@ -123,6 +139,8 @@ export function PostWorkbench(props: Props) {
       saveFd.set("title", title);
       saveFd.set("body", body);
       await updatePostDraft(saveFd);
+      setLastSavedBody(body);
+      setLastSavedTitle(title);
 
       const fd = new FormData();
       fd.set("postId", props.postId);
@@ -226,9 +244,15 @@ export function PostWorkbench(props: Props) {
               {submitPending ? "Submitting…" : "Submit for approval"}
             </Button>
             <span className="ml-auto text-[11px] text-[var(--color-muted-foreground)]">
-              {savedAt
-                ? `Saved ${timeAgo(savedAt)}`
-                : `Submitting notifies ${props.contactName}`}
+              {dirty ? (
+                <span className="font-medium text-[var(--color-aperol)]">
+                  Unsaved changes
+                </span>
+              ) : savedAt ? (
+                `Saved ${timeAgo(savedAt)}`
+              ) : (
+                `Submitting notifies ${props.contactName}`
+              )}
             </span>
           </div>
         ) : null}

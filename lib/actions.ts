@@ -1522,6 +1522,172 @@ const markPostedSchema = z.object({
   postedUrl: z.string().url().optional().or(z.literal("")),
 });
 
+/* ─── Move post to stage (Kanban DnD) ───────────────────────── */
+
+const movePostStageSchema = z.object({
+  postId: z.string().min(1),
+  stage: z.enum(["DRAFT", "PENDING_APPROVAL", "APPROVED", "POSTED", "REJECTED"]),
+});
+
+/**
+ * Move a post from one Kanban column to another. Constrained by the
+ * approval flow:
+ *   DRAFT → PENDING_APPROVAL  → submits for approval (queues notification)
+ *   REJECTED → DRAFT          → reset, ready to rewrite
+ *   APPROVED → POSTED         → mark posted (no URL captured here)
+ *   POSTED → APPROVED         → revert (mistake)
+ *   PENDING → DRAFT           → withdraw before client sees it
+ *
+ * Team CANNOT drag posts INTO Approved or Rejected — those transitions
+ * belong to the client and require explicit approve/reject actions
+ * (rejection needs a note). We throw on illegal moves so the optimistic
+ * update on the client can roll back.
+ */
+export async function movePostToStage(formData: FormData) {
+  const { postId, stage } = movePostStageSchema.parse({
+    postId: formData.get("postId"),
+    stage: formData.get("stage"),
+  });
+  const user = await requireUser();
+  if (user.role === "CLIENT") throw new Error("Clients cannot drag posts");
+
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: {
+      workspace: {
+        include: {
+          memberships: { where: { role: "CLIENT" }, include: { user: true } },
+          contacts: { where: { isPrimary: true } },
+        },
+      },
+    },
+  });
+  if (!post) throw new Error("Post not found");
+  if (post.status === stage) return; // no-op
+
+  const transition = `${post.status}->${stage}`;
+  const allowed = new Set([
+    "DRAFT->PENDING_APPROVAL",
+    "PENDING_APPROVAL->DRAFT",
+    "REJECTED->DRAFT",
+    "APPROVED->POSTED",
+    "POSTED->APPROVED",
+    "DRAFT->DRAFT",
+    "POSTED->POSTED",
+  ]);
+  if (!allowed.has(transition)) {
+    if (
+      transition === "PENDING_APPROVAL->APPROVED" ||
+      transition === "DRAFT->APPROVED" ||
+      transition === "PENDING_APPROVAL->POSTED"
+    ) {
+      throw new Error(
+        "Approval is the client's call — you can't drag into Approved on their behalf."
+      );
+    }
+    if (stage === "REJECTED") {
+      throw new Error(
+        "Rejection needs a note — open the post and use Reject with notes."
+      );
+    }
+    throw new Error(`Move ${transition} isn't allowed.`);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Patch the post with the right side-effects per transition
+    if (transition === "DRAFT->PENDING_APPROVAL") {
+      await tx.post.update({
+        where: { id: postId },
+        data: { status: "PENDING_APPROVAL", rejectionNote: null },
+      });
+      await tx.postEvent.create({
+        data: {
+          postId,
+          workspaceId: post.workspaceId,
+          actorId: user.id,
+          eventType: "SUBMITTED_FOR_APPROVAL",
+        },
+      });
+      // Fire notification (same behaviour as submitPostForApproval)
+      const recipientEmail = pickApprovalRecipient(post.workspace);
+      if (recipientEmail) {
+        await tx.notification.create({
+          data: {
+            workspaceId: post.workspaceId,
+            channel: "EMAIL",
+            recipient: recipientEmail,
+            subject: `New post ready for your approval — ${post.title ?? "Untitled"}`,
+            body: `Your Wilson's team has drafted a new LinkedIn post for your review. Open the portal to approve, edit, or reject with notes.`,
+            relatedType: "post",
+            relatedId: postId,
+            status: "QUEUED",
+          },
+        });
+      }
+    } else if (transition === "PENDING_APPROVAL->DRAFT") {
+      await tx.post.update({
+        where: { id: postId },
+        data: { status: "DRAFT" },
+      });
+      await tx.postEvent.create({
+        data: {
+          postId,
+          workspaceId: post.workspaceId,
+          actorId: user.id,
+          eventType: "EDITED",
+        },
+      });
+    } else if (transition === "REJECTED->DRAFT") {
+      await tx.post.update({
+        where: { id: postId },
+        data: { status: "DRAFT", rejectionNote: null },
+      });
+      await tx.postEvent.create({
+        data: {
+          postId,
+          workspaceId: post.workspaceId,
+          actorId: user.id,
+          eventType: "EDITED",
+        },
+      });
+    } else if (transition === "APPROVED->POSTED") {
+      await tx.post.update({
+        where: { id: postId },
+        data: {
+          status: "POSTED",
+          posterId: user.id,
+          postedAt: new Date(),
+        },
+      });
+      await tx.postEvent.create({
+        data: {
+          postId,
+          workspaceId: post.workspaceId,
+          actorId: user.id,
+          eventType: "POSTED",
+        },
+      });
+    } else if (transition === "POSTED->APPROVED") {
+      await tx.post.update({
+        where: { id: postId },
+        data: { status: "APPROVED", posterId: null, postedAt: null },
+      });
+      await tx.postEvent.create({
+        data: {
+          postId,
+          workspaceId: post.workspaceId,
+          actorId: user.id,
+          eventType: "EDITED",
+        },
+      });
+    }
+  });
+
+  revalidatePath(`/dashboard/workspaces/${post.workspace.slug}/content`);
+  revalidatePath("/dashboard/approvals");
+  revalidatePath("/client/dashboard");
+}
+
 /* ─── Post media (attachments) ──────────────────────────────── */
 
 const MAX_MEDIA_BYTES = 2 * 1024 * 1024; // 2 MB per attachment for v1

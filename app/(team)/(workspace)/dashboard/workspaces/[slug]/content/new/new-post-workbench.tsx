@@ -4,11 +4,13 @@ import { useState, useTransition, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Save, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { Save, Sparkles, Trash2 } from "lucide-react";
 import { PostEditor, type EditorMedia } from "@/components/post/post-editor";
 import { LinkedInPreview } from "@/components/post/linkedin-preview";
 import { WritingMetrics } from "@/components/post/writing-metrics";
 import { ImprovementsSidebar } from "@/components/post/improvements-sidebar";
+import { useUnsavedGuard } from "@/components/post/use-unsaved-guard";
 import { draftPost } from "@/lib/actions";
 
 /**
@@ -37,6 +39,14 @@ export function NewPostWorkbench(props: Props) {
   const [savePending, startSave] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
+  // Guard against losing typed work. The form submission below sets dirty
+  // back to false right before submitting (via setSavingNow) so the
+  // navigation away after draftPost() doesn't trigger the prompt.
+  const [savingNow, setSavingNow] = useState(false);
+  const dirty =
+    !savingNow && (body.trim().length > 0 || title.trim().length > 0 || media.length > 0);
+  useUnsavedGuard(dirty, "Discard this draft? Click Cancel to save it instead.");
+
   // Local-only media: until the post is saved, attachments live in
   // component state. After save the user lands on /content/[id] where
   // attachments are real DB rows.
@@ -61,6 +71,7 @@ export function NewPostWorkbench(props: Props) {
       alert("Add at least 10 characters before saving the draft.");
       return;
     }
+    setSavingNow(true); // suppress the unsaved-guard for the redirect
     startSave(() => {
       // Submit the hidden form — draftPost will redirect to /content/[id]
       // where the user can re-attach media and continue editing.
@@ -143,9 +154,27 @@ export function NewPostWorkbench(props: Props) {
             <Save className="h-4 w-4" />
             {savePending ? "Saving…" : "Save draft"}
           </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            asChild
+          >
+            <Link
+              href={`/dashboard/workspaces/${props.slug}/content`}
+              data-skip-guard="true"
+              onClick={() => setSavingNow(true)}
+            >
+              <Trash2 className="h-4 w-4" /> Discard
+            </Link>
+          </Button>
           <span className="ml-auto text-[11px] text-[var(--color-muted-foreground)]">
-            Saving keeps it in &ldquo;In progress&rdquo;. Submit for approval
-            from the next page.
+            {dirty ? (
+              <span className="font-medium text-[var(--color-aperol)]">
+                Unsaved
+              </span>
+            ) : (
+              "Save keeps it in 'In progress'."
+            )}
           </span>
         </div>
       </div>
