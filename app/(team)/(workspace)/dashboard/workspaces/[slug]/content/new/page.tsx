@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { requireRole, requireWorkspace } from "@/lib/auth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { prisma } from "@/lib/db";
 import { ArrowLeft } from "lucide-react";
-import { draftPost } from "@/lib/actions";
+import { NewPostWorkbench } from "./new-post-workbench";
 
 export default async function NewPostPage({
   params,
@@ -13,6 +12,12 @@ export default async function NewPostPage({
   await requireRole("ADMIN", "TEAM_MEMBER");
   const { slug } = await params;
   const { workspace } = await requireWorkspace(slug);
+
+  // Pull the primary contact so the LinkedIn preview shows the right
+  // author in the new-post flow (matches the post-detail behaviour).
+  const primaryContact = await prisma.clientContact.findFirst({
+    where: { workspaceId: workspace.id, isPrimary: true },
+  });
 
   return (
     <div className="min-h-screen">
@@ -27,48 +32,20 @@ export default async function NewPostPage({
           New post
         </h1>
         <p className="text-sm text-[var(--color-muted-foreground)]">
-          Drafting for {workspace.name} · {workspace.contactName}&apos;s LinkedIn feed
+          Drafting for {workspace.name} ·{" "}
+          {primaryContact?.fullName ?? workspace.contactName}&apos;s LinkedIn feed
         </p>
       </header>
 
-      <div className="mx-auto max-w-3xl px-8 py-10">
-        <form action={draftPost} className="space-y-5">
-          <input type="hidden" name="workspaceSlug" value={slug} />
-
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-[var(--color-charcoal-500)]">
-              Working title (internal only)
-            </span>
-            <Input name="title" placeholder="e.g. Pipeline transparency take" />
-          </label>
-
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-[var(--color-charcoal-500)]">
-              Post body <span className="text-[var(--color-raspberry)]">*</span>
-            </span>
-            <textarea
-              name="body"
-              rows={14}
-              required
-              minLength={10}
-              placeholder={`A CFO asked me last week...`}
-              className="w-full rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 font-sans text-sm leading-relaxed shadow-[var(--shadow-soft)]"
-            />
-          </label>
-
-          <div className="flex items-center gap-2 border-t border-[var(--color-border)] pt-5">
-            <Button type="submit" variant="accent">
-              Save draft
-            </Button>
-            <Button type="button" variant="ghost" asChild>
-              <Link href={`/dashboard/workspaces/${slug}/content`}>Cancel</Link>
-            </Button>
-          </div>
-          <p className="text-[11px] text-[var(--color-muted-foreground)]">
-            Saving as a draft keeps it in the &ldquo;In progress&rdquo; column. Submit for
-            approval when you&apos;re ready.
-          </p>
-        </form>
+      <div className="px-6 py-6 lg:px-8">
+        <NewPostWorkbench
+          slug={slug}
+          workspaceName={workspace.name}
+          workspaceLogoUrl={workspace.logoUrl}
+          workspaceAccentColor={workspace.accentColor}
+          contactName={primaryContact?.fullName ?? workspace.contactName}
+          contactTitle={primaryContact?.title ?? null}
+        />
       </div>
     </div>
   );
