@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "./db";
 import { requireUser, requireWorkspace } from "./auth";
+import { sendApprovalEmail, type ApprovalEmailOptions } from "./email";
 
 /**
  * All server actions for the Wilson's portal. Each one:
@@ -106,6 +107,44 @@ function pickApprovalRecipient(workspace: WorkspaceForApproval): string | null {
   return fallback ?? null;
 }
 
+/**
+ * Send the approval email via Resend (post-transaction) and update the
+ * Notification row's status. Errors never bubble — the underlying action
+ * already committed; failed delivery is logged + recorded as FAILED so
+ * the team can see it in the outbox.
+ *
+ * If RESEND_API_KEY isn't configured, the notification stays QUEUED so
+ * it can be retried later when the env var is added.
+ */
+async function dispatchApprovalEmail(
+  notificationId: string,
+  opts: ApprovalEmailOptions
+): Promise<void> {
+  const result = await sendApprovalEmail(opts);
+
+  try {
+    if (result.ok) {
+      await prisma.notification.update({
+        where: { id: notificationId },
+        data: { status: "SENT", sentAt: new Date() },
+      });
+    } else if ("skipped" in result && result.skipped) {
+      // No API key — leave QUEUED so a later deploy can retry.
+      console.log(
+        "[email] skipped (no RESEND_API_KEY) — notification stays QUEUED"
+      );
+    } else {
+      console.error("[email] send failed:", result.error);
+      await prisma.notification.update({
+        where: { id: notificationId },
+        data: { status: "FAILED" },
+      });
+    }
+  } catch (e) {
+    console.error("[email] notification status update failed:", e);
+  }
+}
+
 /* ─── Message drafting ───────────────────────────────────────── */
 
 const draftMessageSchema = z.object({
@@ -188,6 +227,7 @@ export async function submitForApproval(formData: FormData) {
     where: { id: messageId },
     include: {
       prospect: true,
+      drafter: true,
       workspace: {
         include: {
           memberships: { where: { role: "CLIENT" }, include: { user: true } },
@@ -202,7 +242,7 @@ export async function submitForApproval(formData: FormData) {
 
   const recipientEmail = pickApprovalRecipient(message.workspace);
 
-  await prisma.$transaction(async (tx) => {
+  const notificationId = await prisma.$transaction(async (tx) => {
     await tx.message.update({
       where: { id: messageId },
       data: { status: "PENDING_APPROVAL", rejectionNote: null },
@@ -222,7 +262,7 @@ export async function submitForApproval(formData: FormData) {
       });
     }
     if (recipientEmail) {
-      await tx.notification.create({
+      const n = await tx.notification.create({
         data: {
           workspaceId: message.workspaceId,
           channel: "EMAIL",
@@ -234,8 +274,25 @@ export async function submitForApproval(formData: FormData) {
           status: "QUEUED",
         },
       });
+      return n.id;
     }
+    return null;
   });
+
+  // Send the email outside the DB transaction so a slow / failed Resend
+  // request doesn't roll back the state change.
+  if (notificationId && recipientEmail) {
+    await dispatchApprovalEmail(notificationId, {
+      to: recipientEmail,
+      kind: "message",
+      contactName: message.workspace.contacts?.[0]?.fullName ?? message.workspace.contactName,
+      workspaceName: message.workspace.name,
+      drafterName: message.drafter.name,
+      preview: message.body,
+      prospectName: message.prospect.fullName,
+      prospectCompany: message.prospect.company,
+    });
+  }
 
   revalidatePath(`/dashboard/prospects/${message.prospectId}`);
   revalidatePath("/dashboard");
@@ -1360,6 +1417,7 @@ export async function submitPostForApproval(formData: FormData) {
   const post = await prisma.post.findUnique({
     where: { id: postId },
     include: {
+      drafter: true,
       workspace: {
         include: {
           memberships: { where: { role: "CLIENT" }, include: { user: true } },
@@ -1374,7 +1432,7 @@ export async function submitPostForApproval(formData: FormData) {
 
   const recipientEmail = pickApprovalRecipient(post.workspace);
 
-  await prisma.$transaction(async (tx) => {
+  const notificationId = await prisma.$transaction(async (tx) => {
     await tx.post.update({
       where: { id: postId },
       data: { status: "PENDING_APPROVAL", rejectionNote: null },
@@ -1388,7 +1446,7 @@ export async function submitPostForApproval(formData: FormData) {
       },
     });
     if (recipientEmail) {
-      await tx.notification.create({
+      const n = await tx.notification.create({
         data: {
           workspaceId: post.workspaceId,
           channel: "EMAIL",
@@ -1400,8 +1458,23 @@ export async function submitPostForApproval(formData: FormData) {
           status: "QUEUED",
         },
       });
+      return n.id;
     }
+    return null;
   });
+
+  if (notificationId && recipientEmail) {
+    await dispatchApprovalEmail(notificationId, {
+      to: recipientEmail,
+      kind: "post",
+      contactName:
+        post.workspace.contacts?.[0]?.fullName ?? post.workspace.contactName,
+      workspaceName: post.workspace.name,
+      drafterName: post.drafter.name,
+      preview: post.body,
+      postTitle: post.title ?? undefined,
+    });
+  }
 
   revalidatePath(`/dashboard/workspaces/${post.workspace.slug}/content`);
   revalidatePath("/dashboard/approvals");
@@ -1554,6 +1627,7 @@ export async function movePostToStage(formData: FormData) {
   const post = await prisma.post.findUnique({
     where: { id: postId },
     include: {
+      drafter: true,
       workspace: {
         include: {
           memberships: { where: { role: "CLIENT" }, include: { user: true } },
@@ -1593,6 +1667,11 @@ export async function movePostToStage(formData: FormData) {
     throw new Error(`Move ${transition} isn't allowed.`);
   }
 
+  // Capture notification id + email so we can dispatch Resend AFTER the
+  // transaction commits (network calls don't belong inside a DB tx).
+  const recipientEmail = pickApprovalRecipient(post.workspace);
+  let pendingNotificationId: string | null = null;
+
   await prisma.$transaction(async (tx) => {
     // Patch the post with the right side-effects per transition
     if (transition === "DRAFT->PENDING_APPROVAL") {
@@ -1609,9 +1688,8 @@ export async function movePostToStage(formData: FormData) {
         },
       });
       // Fire notification (same behaviour as submitPostForApproval)
-      const recipientEmail = pickApprovalRecipient(post.workspace);
       if (recipientEmail) {
-        await tx.notification.create({
+        const n = await tx.notification.create({
           data: {
             workspaceId: post.workspaceId,
             channel: "EMAIL",
@@ -1623,6 +1701,7 @@ export async function movePostToStage(formData: FormData) {
             status: "QUEUED",
           },
         });
+        pendingNotificationId = n.id;
       }
     } else if (transition === "PENDING_APPROVAL->DRAFT") {
       await tx.post.update({
@@ -1682,6 +1761,22 @@ export async function movePostToStage(formData: FormData) {
       });
     }
   });
+
+  // Send the approval email if the DRAFT->PENDING_APPROVAL branch queued
+  // a notification. Outside the transaction so a slow Resend call doesn't
+  // hold the row lock open.
+  if (pendingNotificationId && recipientEmail) {
+    await dispatchApprovalEmail(pendingNotificationId, {
+      to: recipientEmail,
+      kind: "post",
+      contactName:
+        post.workspace.contacts?.[0]?.fullName ?? post.workspace.contactName,
+      workspaceName: post.workspace.name,
+      drafterName: post.drafter.name,
+      preview: post.body,
+      postTitle: post.title ?? undefined,
+    });
+  }
 
   revalidatePath(`/dashboard/workspaces/${post.workspace.slug}/content`);
   revalidatePath("/dashboard/approvals");
