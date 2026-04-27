@@ -1774,6 +1774,53 @@ export async function removePostMedia(formData: FormData) {
   revalidatePath(`/dashboard/workspaces`);
 }
 
+/* ─── Delete a post ─────────────────────────────────────────── */
+
+const deletePostSchema = z.object({
+  postId: z.string().min(1),
+});
+
+/**
+ * Delete a post (and its cascading media + events). Allowed at any
+ * status except POSTED — once a post is live on LinkedIn, the record
+ * stays for history. ADMINs and TEAM_MEMBERs with a membership for the
+ * post's workspace can delete; CLIENTs cannot.
+ */
+export async function deletePost(formData: FormData) {
+  const { postId } = deletePostSchema.parse({
+    postId: formData.get("postId"),
+  });
+  const user = await requireUser();
+  if (user.role === "CLIENT") throw new Error("Clients cannot delete posts");
+
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    select: { id: true, workspaceId: true, status: true, workspace: { select: { slug: true } } },
+  });
+  if (!post) throw new Error("Post not found");
+
+  if (post.status === "POSTED") {
+    throw new Error(
+      "This post is already live on LinkedIn — deleting the record won't unpublish it. Archive only allowed for drafts."
+    );
+  }
+
+  // Verify the caller has access to this post's workspace (admins always
+  // do; team members must have a Membership row).
+  if (user.role !== "ADMIN") {
+    const membership = user.memberships.find(
+      (m) => m.workspaceId === post.workspaceId
+    );
+    if (!membership) throw new Error("You don't have access to this workspace");
+  }
+
+  await prisma.post.delete({ where: { id: postId } });
+
+  revalidatePath(`/dashboard/workspaces/${post.workspace.slug}/content`);
+  revalidatePath(`/dashboard/approvals`);
+  redirect(`/dashboard/workspaces/${post.workspace.slug}/content`);
+}
+
 export async function markPostAsPosted(formData: FormData) {
   const { postId, postedUrl } = markPostedSchema.parse({
     postId: formData.get("postId"),

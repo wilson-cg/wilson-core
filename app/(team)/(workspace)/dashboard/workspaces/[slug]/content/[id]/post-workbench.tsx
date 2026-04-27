@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Save, Send, Sparkles } from "lucide-react";
+import { Save, Send, Sparkles, Trash2 } from "lucide-react";
 import { PostEditor, type EditorMedia } from "@/components/post/post-editor";
 import { LinkedInPreview } from "@/components/post/linkedin-preview";
 import { WritingMetrics } from "@/components/post/writing-metrics";
@@ -16,6 +16,7 @@ import {
   submitPostForApproval,
   addPostMedia,
   removePostMedia,
+  deletePost,
 } from "@/lib/actions";
 
 type Props = {
@@ -53,6 +54,7 @@ export function PostWorkbench(props: Props) {
   const [showImprovements, setShowImprovements] = useState(true);
   const [savePending, startSave] = useTransition();
   const [submitPending, startSubmit] = useTransition();
+  const [deletePending, startDelete] = useTransition();
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   // "Dirty" if the user has changed body or title vs whatever was last
@@ -123,6 +125,36 @@ export function PostWorkbench(props: Props) {
       } catch (e) {
         console.error(e);
         toast.error(e instanceof Error ? e.message : "Save failed");
+      }
+    });
+  }
+
+  async function handleDelete() {
+    const isPending = props.status === "PENDING_APPROVAL";
+    const ok = await confirm({
+      title: isPending ? "Recall and delete this post?" : "Delete this post?",
+      description: isPending
+        ? `This pulls the post back from ${props.contactName}'s approval queue and deletes it permanently. The draft, attached images, and history will be removed.`
+        : "The draft, attached images, and history will be removed permanently. This can't be undone.",
+      confirmLabel: isPending ? "Recall & delete" : "Delete post",
+      cancelLabel: "Keep editing",
+      destructive: true,
+    });
+    if (!ok) return;
+    startDelete(async () => {
+      try {
+        const fd = new FormData();
+        fd.set("postId", props.postId);
+        await deletePost(fd);
+        // Server action redirects to /content — toast appears briefly
+        // before navigation; that's fine.
+        toast.success("Post deleted");
+      } catch (e) {
+        // NEXT_REDIRECT throws are how Next.js implements server-side
+        // redirect inside actions; they're not real errors.
+        if (e && typeof e === "object" && "digest" in e) return;
+        console.error(e);
+        toast.error(e instanceof Error ? e.message : "Couldn't delete post");
       }
     });
   }
@@ -238,7 +270,7 @@ export function PostWorkbench(props: Props) {
               type="button"
               variant="outline"
               onClick={saveDraft}
-              disabled={savePending || submitPending}
+              disabled={savePending || submitPending || deletePending}
             >
               <Save className="h-4 w-4" />
               {savePending ? "Saving…" : "Save draft"}
@@ -247,7 +279,12 @@ export function PostWorkbench(props: Props) {
               type="button"
               variant="accent"
               onClick={submitForApproval}
-              disabled={savePending || submitPending || body.trim().length < 10}
+              disabled={
+                savePending ||
+                submitPending ||
+                deletePending ||
+                body.trim().length < 10
+              }
             >
               <Send className="h-4 w-4" />
               {submitPending ? "Submitting…" : "Submit for approval"}
@@ -263,6 +300,34 @@ export function PostWorkbench(props: Props) {
                 `Submitting notifies ${props.contactName}`
               )}
             </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleDelete}
+              disabled={savePending || submitPending || deletePending}
+              className="text-[var(--color-raspberry)] hover:bg-[var(--color-raspberry)]/10"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {deletePending ? "Deleting…" : "Delete"}
+            </Button>
+          </div>
+        ) : props.status === "PENDING_APPROVAL" ? (
+          <div className="sticky bottom-3 flex items-center gap-2 rounded-[var(--radius-md)] border bg-[var(--color-surface)] p-3 shadow-[var(--shadow-card)]">
+            <span className="text-xs text-[var(--color-muted-foreground)]">
+              Waiting on {props.contactName}&apos;s approval.
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleDelete}
+              disabled={deletePending}
+              className="ml-auto text-[var(--color-raspberry)] hover:bg-[var(--color-raspberry)]/10"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {deletePending ? "Deleting…" : "Recall & delete"}
+            </Button>
           </div>
         ) : null}
       </div>
