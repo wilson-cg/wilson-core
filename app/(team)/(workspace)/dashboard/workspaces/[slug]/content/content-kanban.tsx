@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useOptimistic, useTransition, useRef, useState } from "react";
+import { useEffect, useOptimistic, useTransition, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   DndContext,
@@ -23,8 +23,12 @@ import {
   ArrowRight,
   Paperclip,
   Plus,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { movePostToStage } from "@/lib/actions";
+
+const LIVE_COLLAPSED_KEY = "content-kanban:live-collapsed";
 
 /* ─── Pipeline config ──────────────────────────────────────── */
 
@@ -99,6 +103,28 @@ export function ContentKanban({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const draggingRef = useRef<KanbanPost | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [liveCollapsed, setLiveCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(LIVE_COLLAPSED_KEY);
+      if (stored === "1") setLiveCollapsed(true);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function toggleLiveCollapsed() {
+    setLiveCollapsed((v) => {
+      const next = !v;
+      try {
+        window.localStorage.setItem(LIVE_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -153,9 +179,14 @@ export function ContentKanban({
           <RejectedStrip slug={slug} posts={rejected} />
         ) : null}
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div
+          className={`grid grid-cols-1 gap-4 md:grid-cols-2 ${
+            liveCollapsed ? "xl:grid-cols-[1fr_1fr_1fr_auto]" : "xl:grid-cols-4"
+          }`}
+        >
           {STAGES.map((s) => {
             const items = optimistic.filter((p) => p.status === s.key);
+            const isLive = s.key === "POSTED";
             return (
               <Column
                 key={s.key}
@@ -165,6 +196,9 @@ export function ContentKanban({
                 items={items}
                 slug={slug}
                 draggingId={draggingId}
+                collapsible={isLive}
+                collapsed={isLive && liveCollapsed}
+                onToggleCollapsed={isLive ? toggleLiveCollapsed : undefined}
               />
             );
           })}
@@ -187,6 +221,9 @@ function Column({
   items,
   slug,
   draggingId,
+  collapsible = false,
+  collapsed = false,
+  onToggleCollapsed,
 }: {
   stage: StageKey;
   label: string;
@@ -194,11 +231,44 @@ function Column({
   items: KanbanPost[];
   slug: string;
   draggingId: string | null;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage });
   const styles = TONES[tone];
   const Icon = styles.icon;
   const isDraftCol = stage === "DRAFT";
+
+  if (collapsible && collapsed) {
+    return (
+      <div
+        ref={setNodeRef}
+        className={`flex h-fit flex-col rounded-[var(--radius-lg)] border bg-[var(--color-surface)] shadow-[var(--shadow-soft)] transition-all ${
+          isOver
+            ? "border-[var(--color-forest)] ring-2 ring-[var(--color-forest)]/30"
+            : ""
+        }`}
+      >
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-expanded="false"
+          aria-label={`Expand ${label}`}
+          className={`flex items-center gap-2 rounded-[var(--radius-lg)] px-4 py-3 text-sm font-semibold transition-colors ${styles.header} hover:brightness-95`}
+        >
+          <ChevronRight className="h-4 w-4" />
+          <Icon className="h-4 w-4" />
+          <span className="flex-1 text-left">{label}</span>
+          <span
+            className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold ${styles.pill}`}
+          >
+            {items.length}
+          </span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -210,7 +280,23 @@ function Column({
       }`}
     >
       <div
-        className={`flex items-center gap-2 rounded-t-[var(--radius-lg)] px-4 py-3 text-sm font-semibold ${styles.header}`}
+        className={`flex items-center gap-2 rounded-t-[var(--radius-lg)] px-4 py-3 text-sm font-semibold ${styles.header} ${
+          collapsible ? "cursor-pointer select-none" : ""
+        }`}
+        onClick={collapsible ? onToggleCollapsed : undefined}
+        role={collapsible ? "button" : undefined}
+        tabIndex={collapsible ? 0 : undefined}
+        aria-expanded={collapsible ? "true" : undefined}
+        onKeyDown={
+          collapsible
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onToggleCollapsed?.();
+                }
+              }
+            : undefined
+        }
       >
         <Icon className="h-4 w-4" />
         <span className="flex-1">{label}</span>
@@ -227,6 +313,20 @@ function Column({
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
           </Link>
+        ) : null}
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleCollapsed?.();
+            }}
+            aria-label={`Collapse ${label}`}
+            title="Collapse"
+            className="-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-black/10"
+          >
+            <ChevronDown className="h-4 w-4" strokeWidth={2.5} />
+          </button>
         ) : null}
       </div>
 
