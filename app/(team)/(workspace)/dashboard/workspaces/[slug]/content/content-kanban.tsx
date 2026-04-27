@@ -22,6 +22,7 @@ import {
   XCircle,
   ArrowRight,
   Paperclip,
+  Plus,
 } from "lucide-react";
 import { movePostToStage } from "@/lib/actions";
 
@@ -197,6 +198,7 @@ function Column({
   const { setNodeRef, isOver } = useDroppable({ id: stage });
   const styles = TONES[tone];
   const Icon = styles.icon;
+  const isDraftCol = stage === "DRAFT";
 
   return (
     <div
@@ -217,6 +219,15 @@ function Column({
         >
           {items.length}
         </span>
+        {isDraftCol ? (
+          <Link
+            href={`/dashboard/workspaces/${slug}/content/new`}
+            title="New post (⌘⇧N or N)"
+            className={`-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors ${styles.pill} hover:brightness-95`}
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+          </Link>
+        ) : null}
       </div>
 
       <div className="flex-1 space-y-2 p-3">

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, LayoutGrid, List } from "lucide-react";
 import { ContentKanban, type KanbanPost } from "./content-kanban";
 import { ContentList } from "./content-list";
+import { NewPostShortcut } from "./new-post-shortcut";
 
 /**
  * Content pipeline. Two views:
@@ -45,8 +46,13 @@ export default async function ContentPage({
   const active = allSerialized.filter((p) => p.status !== "REJECTED");
   const rejected = allSerialized.filter((p) => p.status === "REJECTED");
 
+  const newPostHref = `/dashboard/workspaces/${slug}/content/new`;
+
   return (
     <div className="min-h-screen">
+      {/* Registers the ⌘⇧N / N keyboard shortcut for new post */}
+      <NewPostShortcut href={newPostHref} />
+
       <header className="border-b border-[var(--color-border)] px-8 py-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -59,16 +65,23 @@ export default async function ContentPage({
           </div>
           <div className="flex items-center gap-2">
             <ViewToggle slug={slug} view={view} />
-            <Button variant="accent" asChild>
-              <Link href={`/dashboard/workspaces/${slug}/content/new`}>
+            <Button
+              variant="accent"
+              asChild
+              title="New post (⌘⇧N or N)"
+            >
+              <Link href={newPostHref}>
                 <Plus className="h-4 w-4" /> New post
+                <span className="ml-1 inline-flex items-center rounded border border-[var(--color-forest)]/30 bg-[var(--color-forest)]/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[var(--color-forest-950)]">
+                  N
+                </span>
               </Link>
             </Button>
           </div>
         </div>
         <p className="mt-3 text-[11px] text-[var(--color-muted-foreground)]">
-          Tip: drag a card between columns to move it. Submitting a post for
-          approval automatically notifies the client.
+          Tip: drag a card between columns to move it. Press{" "}
+          <Kbd small>N</Kbd> or <Kbd small>⌘⇧N</Kbd> for a new post.
         </p>
       </header>
 
@@ -78,6 +91,26 @@ export default async function ContentPage({
         <ContentList slug={slug} posts={active} rejected={rejected} />
       )}
     </div>
+  );
+}
+
+/* ─── Kbd hint ────────────────────────────────────────────── */
+
+function Kbd({
+  children,
+  small,
+}: {
+  children: React.ReactNode;
+  small?: boolean;
+}) {
+  return (
+    <kbd
+      className={`ml-1 inline-flex items-center rounded border border-[var(--color-border-strong)] bg-[var(--color-virgil)] font-mono font-medium text-[var(--color-charcoal)] ${
+        small ? "px-1 py-px text-[9px]" : "px-1.5 py-0.5 text-[10px]"
+      }`}
+    >
+      {children}
+    </kbd>
   );
 }
 
