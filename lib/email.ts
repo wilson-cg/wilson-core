@@ -176,8 +176,10 @@ function renderHtml(p: {
   ctaUrl: string;
   workspaceName: string;
 }): string {
-  const appUrl = (process.env.APP_URL ?? APP_URL_DEFAULT).replace(/\/$/, "");
-  const wordmarkUrl = `${appUrl}/brand/wilsons-wordmark-light.svg`;
+  // Note: we render the wordmark as styled text rather than an <img> because
+  // most email clients (notably Gmail) strip <svg> and even SVG <img> tags,
+  // and we don't ship a PNG wordmark. Italic Instrument Serif at scale gives
+  // us the same visual signature the marketing wordmark uses.
 
   return `<!doctype html>
 <html lang="en">
@@ -195,16 +197,12 @@ function renderHtml(p: {
     <tr>
       <td align="center">
 
-        <!-- Wordmark on the forest background -->
+        <!-- Wordmark on the forest background. Rendered as italic serif
+             text so every email client renders it (Gmail strips SVG). -->
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
           <tr>
-            <td align="center">
-              <img
-                src="${escape(wordmarkUrl)}"
-                alt="Wilson's"
-                width="140"
-                style="display:block;width:140px;height:auto;border:0;outline:none;"
-              />
+            <td align="center" style="font-family:'Instrument Serif',Georgia,'Times New Roman',serif;font-style:italic;font-size:44px;line-height:1;color:${BRAND.virgil};letter-spacing:-0.02em;">
+              Wilson&rsquo;s
             </td>
           </tr>
         </table>
@@ -226,7 +224,7 @@ function renderHtml(p: {
               <p style="margin:0 0 6px 0;font-size:13px;color:${BRAND.charcoal300};">
                 Hi ${escape(p.contactFirstName)},
               </p>
-              <h1 style="margin:0 0 8px 0;font-family:'Instrument Serif',Georgia,serif;font-size:28px;line-height:1.15;color:${BRAND.forest};letter-spacing:-0.01em;">
+              <h1 style="margin:0 0 8px 0;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:26px;font-weight:600;line-height:1.2;color:${BRAND.forest};letter-spacing:-0.02em;">
                 ${escape(p.headline)}
               </h1>
               <p style="margin:0 0 20px 0;font-size:14px;line-height:1.55;color:${BRAND.charcoal500};">
