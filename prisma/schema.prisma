@@ -1,0 +1,417 @@
+// Wilson's Client Portal — data model
+//
+// v1 scope: approval + project management. No LinkedIn integration, no
+// Unipile. Prospects are entered by Wilson's staff. Messages are drafted
+// by staff, approved by clients, sent manually through the client's own
+// LinkedIn session, and marked as sent/replied by staff.
+//
+// SQLite for dev + stress testing — swap to Postgres via provider change
+// when we deploy. All queries are workspace-scoped (see lib/scope.ts).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Users & access ─────────────────────────────────────────────
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  name          String
+  role          SystemRole   @default(CLIENT)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  memberships   Membership[]
+  draftedMessages  Message[] @relation("Drafter")
+  approvedMessages Message[] @relation("Approver")
+  sentMessages     Message[] @relation("Sender")
+  assignedProspects Prospect[] @relation("Assignee")
+  events        MessageEvent[]
+
+  draftedPosts  Post[] @relation("PostDrafter")
+  approvedPosts Post[] @relation("PostApprover")
+  postedPosts   Post[] @relation("PostPoster")
+  postEvents    PostEvent[]
+
+  prospectEvents ProspectEvent[]
+}
+
+enum SystemRole {
+  ADMIN         // Wilson's agency admin
+  TEAM_MEMBER   // Wilson's team member
+  CLIENT        // External client user
+}
+
+model Membership {
+  id          String        @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now())
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+enum WorkspaceRole {
+  ADMIN         // Wilson's admin (full access, all workspaces — membership grants access)
+  TEAM_MEMBER   // Wilson's team member assigned to this workspace
+  CLIENT        // Client user (their own workspace only)
+}
+
+// ─── Workspaces ─────────────────────────────────────────────────
+
+model Workspace {
+  id            String       @id @default(cuid())
+  name          String       // Display name (e.g. "Condor Group")
+  slug          String       @unique
+  businessName  String?      // Legal business name if different from display name
+  contactName   String       // Cached primary contact name (denormalized from ClientContact, for display)
+  accentColor   String?      // Optional white-label accent
+  logoUrl       String?      // URL or data: URL of the client's logo
+  linkedinUrl   String?      // Company LinkedIn page URL
+  approvalEmail String?      // Override email for approval notifications. Falls back to primary contact's email.
+  onboardingToken String?    @unique  // Public-shareable token unlocking /onboard/[token]. Scoped to this workspace only.
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  memberships   Membership[]
+  prospects     Prospect[]
+  messages      Message[]
+  events        MessageEvent[]
+  icp           Icp?
+  posts          Post[]
+  postEvents     PostEvent[]
+  notifications  Notification[]
+  prospectEvents ProspectEvent[]
+  contacts       ClientContact[]
+  onboarding     OnboardingResponse[]
+}
+
+model Icp {
+  id             String     @id @default(cuid())
+  workspaceId    String     @unique
+  summary        String     // Ideal customer summary (free text)
+  toneOfVoice    String     // Tone + dos/donts as markdown
+  mustNotDo      String     // Comma-separated must-nots
+  updatedAt      DateTime   @updatedAt
+
+  workspace      Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// ─── Prospects ──────────────────────────────────────────────────
+
+model Prospect {
+  id                   String         @id @default(cuid())
+  workspaceId          String
+  fullName             String
+  linkedinUrl          String
+  company              String
+  title                String?
+  email                String?        // Optional; many prospects won't have an email known
+  location             String?        // Freeform city / region
+  tags                 String?        // Comma-separated for v1 simplicity
+  fitScore             FitScore       @default(POSSIBLE)
+  status               ProspectStatus @default(IDENTIFIED)
+  assigneeId           String?
+  notes                String?        // Internal-only free text
+  linkedinConnectedAt  DateTime?      // When we connected with them on LinkedIn
+  lastContactedAt      DateTime?      // Last outbound contact (editable, overrides derived)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  workspace            Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignee             User?           @relation("Assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages             Message[]
+  events               ProspectEvent[]
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([assigneeId])
+}
+
+// ─── Prospect activity timeline ────────────────────────────────
+// Everything that isn't a formal portal action (draft/approve/send) —
+// LinkedIn connections, external calls/emails, manual notes, custom logs.
+
+model ProspectEvent {
+  id           String            @id @default(cuid())
+  prospectId   String
+  workspaceId  String
+  actorId      String
+  eventType    ProspectEventType
+  note         String?
+  occurredAt   DateTime          // Real-world date the event happened
+  createdAt    DateTime          @default(now())
+
+  prospect     Prospect          @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor        User              @relation(fields: [actorId], references: [id])
+
+  @@index([prospectId])
+  @@index([workspaceId])
+}
+
+enum ProspectEventType {
+  ADDED
+  LINKEDIN_CONNECTION_SENT
+  LINKEDIN_CONNECTION_ACCEPTED
+  CONTACTED
+  CALL
+  EMAIL
+  MEETING
+  NOTE_ADDED
+  CUSTOM
+}
+
+enum FitScore {
+  STRONG
+  POSSIBLE
+  NOT_A_FIT
+}
+
+enum ProspectStatus {
+  IDENTIFIED
+  MESSAGE_DRAFTED
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  REPLIED
+  MEETING_BOOKED
+  NOT_INTERESTED
+  NURTURE
+}
+
+// ─── Messages ───────────────────────────────────────────────────
+
+model Message {
+  id            String         @id @default(cuid())
+  workspaceId   String
+  prospectId    String
+  body          String
+  status        MessageStatus  @default(DRAFT)
+  version       Int            @default(1)
+  drafterId     String
+  approverId    String?        // Client user who approved
+  approvedAt    DateTime?
+  senderId      String?        // Team member who marked sent
+  sentAt        DateTime?
+  repliedAt     DateTime?      // Set when team marks replied
+  rejectionNote String?        // Client's rejection note if any
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  prospect      Prospect       @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  drafter       User           @relation("Drafter", fields: [drafterId], references: [id])
+  approver      User?          @relation("Approver", fields: [approverId], references: [id], onDelete: SetNull)
+  sender        User?          @relation("Sender", fields: [senderId], references: [id], onDelete: SetNull)
+  events        MessageEvent[]
+
+  @@index([workspaceId])
+  @@index([prospectId])
+  @@index([status])
+}
+
+enum MessageStatus {
+  DRAFT             // Team is still working on it
+  PENDING_APPROVAL  // Submitted to client
+  APPROVED          // Client approved
+  REJECTED          // Client rejected (with note)
+  SENT              // Team marked sent
+  REPLIED           // Team marked replied
+}
+
+// ─── Audit trail ────────────────────────────────────────────────
+
+model MessageEvent {
+  id           String       @id @default(cuid())
+  messageId    String
+  workspaceId  String
+  actorId      String
+  eventType    EventType
+  metadata     String?      // JSON blob for diffs, notes, etc.
+  createdAt    DateTime     @default(now())
+
+  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor        User         @relation(fields: [actorId], references: [id])
+
+  @@index([messageId])
+  @@index([workspaceId])
+}
+
+enum EventType {
+  DRAFTED
+  SUBMITTED_FOR_APPROVAL
+  APPROVED
+  EDITED_AND_APPROVED
+  REJECTED
+  SENT
+  REPLIED
+  STATUS_CHANGED
+  NOTE_ADDED
+}
+
+// ─── Content posts ──────────────────────────────────────────────
+// LinkedIn posts drafted by the team, approved by the client, then posted
+// manually from the client's own LinkedIn account. Parallel to Message
+// but attached directly to the Workspace — content is about the client's
+// feed, not about a specific prospect.
+
+model Post {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  title         String?       // Internal label only, not posted
+  body          String
+  status        PostStatus    @default(DRAFT)
+  version       Int           @default(1)
+  drafterId     String
+  approverId    String?
+  approvedAt    DateTime?
+  posterId      String?       // Team member who confirmed the post went up
+  postedAt      DateTime?
+  postedUrl     String?       // Optional link to the actual LinkedIn post
+  rejectionNote String?
+  scheduledFor  DateTime?     // Optional target date
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  drafter       User          @relation("PostDrafter", fields: [drafterId], references: [id])
+  approver      User?         @relation("PostApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  poster        User?         @relation("PostPoster", fields: [posterId], references: [id], onDelete: SetNull)
+  events        PostEvent[]
+
+  @@index([workspaceId])
+  @@index([status])
+}
+
+enum PostStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  POSTED
+}
+
+model PostEvent {
+  id           String         @id @default(cuid())
+  postId       String
+  workspaceId  String
+  actorId      String
+  eventType    PostEventType
+  metadata     String?
+  createdAt    DateTime       @default(now())
+
+  post         Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor        User           @relation(fields: [actorId], references: [id])
+
+  @@index([postId])
+  @@index([workspaceId])
+}
+
+enum PostEventType {
+  DRAFTED
+  EDITED
+  SUBMITTED_FOR_APPROVAL
+  APPROVED
+  EDITED_AND_APPROVED
+  REJECTED
+  POSTED
+}
+
+// ─── Notifications ──────────────────────────────────────────────
+// Mock notification outbox. When a team member submits a draft for client
+// approval (message or post), we queue a Notification row describing what
+// WOULD be sent over email/Slack. Real delivery wires up later (Resend +
+// Slack webhook) — for stress testing, the portal shows the outbox so you
+// can see the notification would fire.
+
+model Notification {
+  id            String              @id @default(cuid())
+  workspaceId   String
+  channel       NotificationChannel
+  recipient     String              // email address or @handle
+  subject       String
+  body          String
+  relatedType   String?             // "message" | "post"
+  relatedId     String?
+  status        NotificationStatus  @default(QUEUED)
+  sentAt        DateTime?
+  createdAt     DateTime            @default(now())
+
+  workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([status])
+}
+
+enum NotificationChannel {
+  EMAIL
+  SLACK
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+// ─── Client onboarding ──────────────────────────────────────────
+// A workspace can have multiple client contacts (founder + EA + co-founder
+// is common). Exactly one is marked primary — that contact's email is the
+// default approval recipient if workspace.approvalEmail isn't set.
+
+model ClientContact {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  fullName      String
+  title         String?
+  email         String?
+  linkedinUrl   String?
+  isPrimary     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// Onboarding questionnaire — Q&A rows per workspace, edited like a sheet.
+// Default questions seeded on workspace creation; can be added/removed/
+// reordered/edited freely afterwards.
+
+model OnboardingResponse {
+  id            String                @id @default(cuid())
+  workspaceId   String
+  question      String
+  answer        String?
+  fieldType     OnboardingFieldType   @default(LONGTEXT)
+  orderIndex    Int                   @default(0)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+enum OnboardingFieldType {
+  TEXT
+  LONGTEXT
+  URL
+  NUMBER
+}
