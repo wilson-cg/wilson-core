@@ -761,6 +761,20 @@ async function main() {
     status: "DRAFT",
   });
 
+  // ─── Realistic depth — features only show when data exists ──
+  console.log("🧵 Adding follow-up message threads…");
+  await seedFollowUpThreads(condor.id, sarah.id, stan.id);
+  await seedClearlakeFollowUpThreads(clearlake.id, max.id, james.id);
+
+  console.log("📞 Adding manual activity events…");
+  await seedActivityVariety(condor.id, sarah.id);
+  await seedActivityVariety(clearlake.id, max.id);
+
+  console.log("📨 Adding varied notifications…");
+  await seedNotificationVariety(condor.id, "stan@condor.com");
+  await seedNotificationVariety(clearlake.id, "approvals@clearlake.com");
+  await seedNotificationVariety(rook.id, "max@rook.com");
+
   const counts = {
     users: await db.user.count(),
     workspaces: await db.workspace.count(),
@@ -1112,6 +1126,336 @@ async function seedOnboarding(
         answer: answer ?? undefined,
         fieldType: "LONGTEXT",
         orderIndex: i,
+      },
+    });
+  }
+}
+
+/* ─── Realistic depth helpers ────────────────────────────────
+ *
+ * These run after the basic seed and add the kind of data that exposes
+ * every UI surface: prospects with multi-message threads, manual activity
+ * events outside the LinkedIn auto-generated ones, and notifications
+ * spread across channel + status combinations.
+ */
+
+async function seedFollowUpThreads(
+  workspaceId: string,
+  drafterId: string,
+  clientId: string
+) {
+  // Find 3 Condor prospects that already have a settled message and add
+  // chronologically-correct follow-up threads on top.
+
+  // 1. Marcus Reid (REPLIED) — opener replied, follow-up sent, awaiting reply
+  const marcus = await db.prospect.findFirst({
+    where: { workspaceId, fullName: "Marcus Reid" },
+  });
+  if (marcus) {
+    const followUp = await db.message.create({
+      data: {
+        workspaceId,
+        prospectId: marcus.id,
+        drafterId,
+        body: "Marcus — quick follow-up on my note last week. The thread you just posted on pipeline transparency lines up almost exactly with what we built at Condor. Genuinely curious to hear how you're thinking about the messy middle. 20 mins?",
+        status: "SENT",
+        approverId: clientId,
+        approvedAt: daysAgo(2),
+        senderId: drafterId,
+        sentAt: daysAgo(1),
+      },
+    });
+    for (const ev of [
+      { type: "DRAFTED", date: daysAgo(3) },
+      { type: "SUBMITTED_FOR_APPROVAL", date: daysAgo(2) },
+      { type: "APPROVED", date: daysAgo(2) },
+      { type: "SENT", date: daysAgo(1) },
+    ]) {
+      await db.messageEvent.create({
+        data: {
+          messageId: followUp.id,
+          workspaceId,
+          actorId: drafterId,
+          eventType: ev.type as never,
+          createdAt: ev.date,
+        },
+      });
+    }
+  }
+
+  // 2. Priya Shah (MEETING_BOOKED) — opener replied, met, post-meeting touch in DRAFT
+  const priya = await db.prospect.findFirst({
+    where: { workspaceId, fullName: "Priya Shah" },
+  });
+  if (priya) {
+    const postMeeting = await db.message.create({
+      data: {
+        workspaceId,
+        prospectId: priya.id,
+        drafterId,
+        body: "Priya, great call last week — really enjoyed your perspective on the ops org chart. Sharing the two case studies you asked about. Happy to set up a follow-up with the team if useful.",
+        status: "DRAFT",
+      },
+    });
+    await db.messageEvent.create({
+      data: {
+        messageId: postMeeting.id,
+        workspaceId,
+        actorId: drafterId,
+        eventType: "DRAFTED",
+        createdAt: hoursAgo(20),
+      },
+    });
+  }
+
+  // 3. Evelyn Park (SENT) — opener pending reply, but already a draft of a follow-up nudge
+  const evelyn = await db.prospect.findFirst({
+    where: { workspaceId, fullName: "Evelyn Park" },
+  });
+  if (evelyn) {
+    const nudge = await db.message.create({
+      data: {
+        workspaceId,
+        prospectId: evelyn.id,
+        drafterId,
+        body: "Evelyn, no pressure on the earlier note — wanted to share one more data point that might be relevant to the async-ops piece. Happy to send the link if useful.",
+        status: "PENDING_APPROVAL",
+      },
+    });
+    for (const ev of [
+      { type: "DRAFTED", date: daysAgo(2) },
+      { type: "SUBMITTED_FOR_APPROVAL", date: daysAgo(1) },
+    ]) {
+      await db.messageEvent.create({
+        data: {
+          messageId: nudge.id,
+          workspaceId,
+          actorId: drafterId,
+          eventType: ev.type as never,
+          createdAt: ev.date,
+        },
+      });
+    }
+  }
+}
+
+async function seedClearlakeFollowUpThreads(
+  workspaceId: string,
+  drafterId: string,
+  clientId: string
+) {
+  // Theo Richter (REPLIED) — full multi-touch sequence: opener replied,
+  // follow-up replied, third message sent, awaiting another reply.
+  const theo = await db.prospect.findFirst({
+    where: { workspaceId, fullName: "Theo Richter" },
+  });
+  if (!theo) return;
+
+  // Follow-up #1 — replied
+  const followUp1 = await db.message.create({
+    data: {
+      workspaceId,
+      prospectId: theo.id,
+      drafterId,
+      body: "Theo, hopping back in — let me know which week works for that 30 min. Genuinely think the Series A diligence parallels are striking.",
+      status: "REPLIED",
+      approverId: clientId,
+      approvedAt: daysAgo(7),
+      senderId: drafterId,
+      sentAt: daysAgo(6),
+      repliedAt: daysAgo(5),
+    },
+  });
+  for (const ev of [
+    { type: "DRAFTED", date: daysAgo(8) },
+    { type: "SUBMITTED_FOR_APPROVAL", date: daysAgo(7) },
+    { type: "APPROVED", date: daysAgo(7) },
+    { type: "SENT", date: daysAgo(6) },
+    { type: "REPLIED", date: daysAgo(5) },
+  ]) {
+    await db.messageEvent.create({
+      data: {
+        messageId: followUp1.id,
+        workspaceId,
+        actorId: drafterId,
+        eventType: ev.type as never,
+        createdAt: ev.date,
+      },
+    });
+  }
+
+  // Follow-up #2 — sent, awaiting reply
+  const followUp2 = await db.message.create({
+    data: {
+      workspaceId,
+      prospectId: theo.id,
+      drafterId,
+      body: "Theo, sending my partner Marcus's calendar — happy to align on a slot that works on your end. Looking forward to it.",
+      status: "SENT",
+      approverId: clientId,
+      approvedAt: daysAgo(2),
+      senderId: drafterId,
+      sentAt: daysAgo(1),
+    },
+  });
+  for (const ev of [
+    { type: "DRAFTED", date: daysAgo(3) },
+    { type: "SUBMITTED_FOR_APPROVAL", date: daysAgo(2) },
+    { type: "APPROVED", date: daysAgo(2) },
+    { type: "SENT", date: daysAgo(1) },
+  ]) {
+    await db.messageEvent.create({
+      data: {
+        messageId: followUp2.id,
+        workspaceId,
+        actorId: drafterId,
+        eventType: ev.type as never,
+        createdAt: ev.date,
+      },
+    });
+  }
+}
+
+async function seedActivityVariety(workspaceId: string, actorId: string) {
+  // Pick a few prospects in this workspace and add manual activity events
+  // to demonstrate the timeline beyond the auto-generated LinkedIn ones.
+  const prospects = await db.prospect.findMany({
+    where: { workspaceId, status: { in: ["REPLIED", "MEETING_BOOKED", "SENT"] } },
+    take: 4,
+  });
+
+  const events: Array<{
+    fullName: string;
+    type: "CALL" | "EMAIL" | "MEETING" | "NOTE_ADDED" | "CONTACTED";
+    note: string;
+    daysOffset: number;
+  }> = [
+    {
+      fullName: prospects[0]?.fullName ?? "",
+      type: "CALL",
+      note:
+        "30-min intro call. They're 6 months into a similar ops rebuild — looking for a sounding board. Sending case study #2 next week.",
+      daysOffset: 4,
+    },
+    {
+      fullName: prospects[1]?.fullName ?? "",
+      type: "MEETING",
+      note:
+        "In-person at SaaStr afterparty. Real chemistry with the product side. Asked us to send a deck on the org-chart playbook.",
+      daysOffset: 8,
+    },
+    {
+      fullName: prospects[2]?.fullName ?? "",
+      type: "EMAIL",
+      note:
+        "External email exchange — they sent over their FY plan. Confidential. Not posted in the portal but flagged here so the team knows it exists.",
+      daysOffset: 6,
+    },
+    {
+      fullName: prospects[3]?.fullName ?? "",
+      type: "NOTE_ADDED",
+      note:
+        "Their CEO is interviewing for a new VP Ops in Q3 — worth re-engaging then with a different angle.",
+      daysOffset: 3,
+    },
+  ];
+
+  for (const e of events) {
+    if (!e.fullName) continue;
+    const p = prospects.find((x) => x.fullName === e.fullName);
+    if (!p) continue;
+    await db.prospectEvent.create({
+      data: {
+        prospectId: p.id,
+        workspaceId,
+        actorId,
+        eventType: e.type,
+        note: e.note,
+        occurredAt: daysAgo(e.daysOffset),
+      },
+    });
+  }
+}
+
+async function seedNotificationVariety(
+  workspaceId: string,
+  recipientEmail: string
+) {
+  // Spread across QUEUED / SENT / FAILED and EMAIL / SLACK so the
+  // notifications outbox UI is exercised properly.
+  const messages: Array<{
+    channel: "EMAIL" | "SLACK";
+    recipient: string;
+    subject: string;
+    body: string;
+    relatedType: string;
+    status: "QUEUED" | "SENT" | "FAILED";
+    sentAtDaysAgo?: number;
+    createdDaysAgo: number;
+  }> = [
+    {
+      channel: "EMAIL",
+      recipient: recipientEmail,
+      subject: "Outreach ready for approval — Jane Doe at Helix Biosciences",
+      body: "Your Wilson's team has drafted a new outbound message. Open the portal to approve.",
+      relatedType: "message",
+      status: "SENT",
+      sentAtDaysAgo: 6,
+      createdDaysAgo: 6,
+    },
+    {
+      channel: "EMAIL",
+      recipient: recipientEmail,
+      subject: "Weekly summary — 3 meetings booked this week",
+      body: "3 meetings booked, 34% response rate, 18% follower growth.",
+      relatedType: "summary",
+      status: "SENT",
+      sentAtDaysAgo: 7,
+      createdDaysAgo: 7,
+    },
+    {
+      channel: "SLACK",
+      recipient: "#wilsons-approvals",
+      subject: "New post awaiting approval — Pipeline transparency",
+      body: "Wilson's team submitted a new post for your approval.",
+      relatedType: "post",
+      status: "SENT",
+      sentAtDaysAgo: 2,
+      createdDaysAgo: 2,
+    },
+    {
+      channel: "EMAIL",
+      recipient: recipientEmail,
+      subject: "Outreach ready for approval — 4 prospects",
+      body: "Your Wilson's team has drafted 4 new outbound messages.",
+      relatedType: "message",
+      status: "QUEUED",
+      createdDaysAgo: 1,
+    },
+    {
+      channel: "EMAIL",
+      recipient: "no-longer-valid@bouncedomain.com",
+      subject: "Outreach ready for approval — Robert Chen at Dayline",
+      body: "Your Wilson's team has drafted a new outbound message.",
+      relatedType: "message",
+      status: "FAILED",
+      createdDaysAgo: 5,
+    },
+  ];
+
+  for (const m of messages) {
+    await db.notification.create({
+      data: {
+        workspaceId,
+        channel: m.channel,
+        recipient: m.recipient,
+        subject: m.subject,
+        body: m.body,
+        relatedType: m.relatedType,
+        status: m.status,
+        sentAt:
+          m.sentAtDaysAgo !== undefined ? daysAgo(m.sentAtDaysAgo) : null,
+        createdAt: daysAgo(m.createdDaysAgo),
       },
     });
   }
