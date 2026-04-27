@@ -4,6 +4,7 @@ import { workspaceSettings } from "@/lib/queries";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { ContactsSection } from "@/components/settings/contacts-section";
 import { OnboardingSection } from "@/components/settings/onboarding-section";
+import { DangerZone } from "@/components/settings/danger-zone";
 
 /**
  * Team-side workspace settings. Hosts the same three sections the client
@@ -14,7 +15,7 @@ export default async function WorkspaceSettingsPage({
 }: {
   params: Promise<{ slug: string }>;
 }) {
-  await requireRole("ADMIN", "TEAM_MEMBER");
+  const user = await requireRole("ADMIN", "TEAM_MEMBER");
   const { slug } = await params;
   const { workspace } = await requireWorkspace(slug);
   const data = await workspaceSettings(workspace.id);
@@ -49,6 +50,10 @@ export default async function WorkspaceSettingsPage({
           rows={data.onboarding}
           onboardingToken={data.workspace.onboardingToken}
         />
+
+        {user.role === "ADMIN" ? (
+          <DangerZone slug={slug} workspaceName={data.workspace.name} />
+        ) : null}
       </div>
     </div>
   );

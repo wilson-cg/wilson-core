@@ -42,6 +42,13 @@ type ConfirmOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
+  /**
+   * If set, the confirm button is disabled until the user types this exact
+   * string. Use for high-stakes destructive actions (e.g. workspace delete).
+   */
+  confirmText?: string;
+  /** Optional label shown above the confirm-text input. */
+  confirmTextLabel?: string;
 };
 
 type ToastApi = {
@@ -79,6 +86,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [confirmState, setConfirmState] = useState<
     (ConfirmOptions & { resolve: (v: boolean) => void }) | null
   >(null);
+  const [typedConfirm, setTypedConfirm] = useState("");
   const idRef = useRef(0);
 
   const push = useCallback((variant: Variant, message: string) => {
@@ -98,17 +106,24 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const confirm = useCallback(
     (opts: ConfirmOptions) =>
       new Promise<boolean>((resolve) => {
+        setTypedConfirm("");
         setConfirmState({ ...opts, resolve });
       }),
     []
   );
 
+  const confirmTextRequired = confirmState?.confirmText ?? null;
+  const confirmTextOk =
+    !confirmTextRequired || typedConfirm === confirmTextRequired;
+
   function closeConfirm(value: boolean) {
+    if (value && !confirmTextOk) return;
     confirmState?.resolve(value);
     setConfirmState(null);
+    setTypedConfirm("");
   }
 
-  // Esc closes the confirm; Enter accepts.
+  // Esc closes the confirm; Enter accepts (only if confirm-text matches).
   useEffect(() => {
     if (!confirmState) return;
     function onKey(e: KeyboardEvent) {
@@ -123,7 +138,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [confirmState]);
+  }, [confirmState, typedConfirm]);
 
   return (
     <ToastCtx.Provider value={{ toast, confirm }}>
@@ -163,6 +178,31 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 {confirmState.description}
               </p>
             ) : null}
+            {confirmTextRequired ? (
+              <div className="mt-4">
+                <label className="block text-xs font-medium text-[var(--color-charcoal-500)]">
+                  {confirmState.confirmTextLabel ?? (
+                    <>
+                      Type{" "}
+                      <span className="font-mono font-semibold text-[var(--color-charcoal)]">
+                        {confirmTextRequired}
+                      </span>{" "}
+                      to confirm
+                    </>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={typedConfirm}
+                  onChange={(e) => setTypedConfirm(e.target.value)}
+                  className="mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-virgil)] px-3 py-2 font-mono text-sm text-[var(--color-charcoal)] outline-none transition-colors focus:border-[var(--color-raspberry)] focus:bg-[var(--color-surface)]"
+                  placeholder={confirmTextRequired}
+                />
+              </div>
+            ) : null}
             <div className="mt-5 flex justify-end gap-2">
               <Button
                 type="button"
@@ -175,7 +215,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 type="button"
                 variant={confirmState.destructive ? "destructive" : "accent"}
                 onClick={() => closeConfirm(true)}
-                autoFocus
+                disabled={!confirmTextOk}
+                autoFocus={!confirmTextRequired}
               >
                 {confirmState.confirmLabel ?? "Confirm"}
               </Button>

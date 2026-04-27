@@ -756,6 +756,51 @@ export async function updateWorkspaceProfile(formData: FormData) {
   revalidatePath("/client/dashboard");
 }
 
+/* ─── Delete workspace (a.k.a. client) ───────────────────────── */
+
+const deleteWorkspaceSchema = z.object({
+  workspaceSlug: z.string().min(1),
+  confirmName: z.string().min(1),
+});
+
+/**
+ * Permanently delete a workspace and ALL of its cascading data — prospects,
+ * messages, posts, contacts, onboarding, memberships, etc.
+ *
+ * Admin-only. The caller must echo back the workspace's display name as a
+ * second-factor confirmation; the UI surfaces this as a "type {name} to
+ * confirm" modal.
+ */
+export async function deleteWorkspace(formData: FormData) {
+  const parsed = deleteWorkspaceSchema.parse({
+    workspaceSlug: formData.get("workspaceSlug"),
+    confirmName: formData.get("confirmName"),
+  });
+
+  const user = await requireUser();
+  if (user.role !== "ADMIN") {
+    throw new Error("Only admins can delete a workspace");
+  }
+
+  const workspace = await prisma.workspace.findUnique({
+    where: { slug: parsed.workspaceSlug },
+    select: { id: true, slug: true, name: true },
+  });
+  if (!workspace) throw new Error("Workspace not found");
+
+  if (parsed.confirmName.trim() !== workspace.name) {
+    throw new Error("Confirmation text did not match the workspace name");
+  }
+
+  // All Workspace child relations cascade on delete (see prisma/schema.prisma),
+  // so a single workspace.delete sweeps everything.
+  await prisma.workspace.delete({ where: { id: workspace.id } });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/approvals");
+  redirect("/dashboard");
+}
+
 /* ─── Client contacts ───────────────────────────────────────── */
 
 const contactInputSchema = z.object({
