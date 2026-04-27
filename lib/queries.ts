@@ -269,7 +269,12 @@ export async function clientHomeData(user: AuthedUser) {
     weeklyPosted,
     recentReplies,
   ] = await Promise.all([
-    prisma.workspace.findUnique({ where: { id: workspaceId } }),
+    prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      include: {
+        contacts: { where: { isPrimary: true }, take: 1 },
+      },
+    }),
     prisma.message.findMany({
       where: { workspaceId, status: "PENDING_APPROVAL" },
       include: { prospect: true, drafter: true },

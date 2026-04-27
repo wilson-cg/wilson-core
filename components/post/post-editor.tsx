@@ -9,6 +9,7 @@ import {
   X,
   Loader2,
   Save,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -251,9 +252,10 @@ export function PostEditor({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex h-20 w-20 shrink-0 items-center justify-center rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] text-[var(--color-charcoal-300)] hover:border-[var(--color-forest)] hover:text-[var(--color-forest)]"
+                className="inline-flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-[var(--radius-md)] border-2 border-dashed border-[var(--color-border-strong)] text-[var(--color-charcoal-300)] hover:border-[var(--color-forest)] hover:text-[var(--color-forest)]"
               >
                 <ImageIcon className="h-5 w-5" />
+                <span className="text-[10px] font-medium">Add</span>
               </button>
             </div>
             <p className="mt-2 text-[10px] text-[var(--color-muted-foreground)]">
@@ -262,17 +264,27 @@ export function PostEditor({
             </p>
           </div>
         ) : (
-          <div className="border-t border-[var(--color-border)] px-4 py-2.5 text-[11px] text-[var(--color-muted-foreground)]">
-            Drag an image here, or{" "}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="font-medium text-[var(--color-forest)] hover:underline"
-            >
-              browse files
-            </button>
-            .
-          </div>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="m-3 flex w-[calc(100%-1.5rem)] flex-col items-center justify-center gap-2 rounded-[var(--radius-lg)] border-2 border-dashed border-[var(--color-border-strong)] bg-[var(--color-virgil)]/60 px-6 py-7 text-center transition-colors hover:border-[var(--color-forest)] hover:bg-[var(--color-forest-100)]/50"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-forest)] text-[var(--color-lime)]">
+              <Upload className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[var(--color-charcoal)]">
+                Drop an image here
+              </p>
+              <p className="mt-0.5 text-xs text-[var(--color-muted-foreground)]">
+                or{" "}
+                <span className="font-medium text-[var(--color-forest)] underline">
+                  browse files
+                </span>{" "}
+                · PNG, JPEG, GIF, WEBP up to 2MB
+              </p>
+            </div>
+          </button>
         )}
       </div>
 

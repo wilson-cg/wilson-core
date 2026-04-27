@@ -8,8 +8,9 @@ import {
 } from "@/lib/actions";
 import { MessageApprovalActions } from "./message-actions";
 import { PostApprovalActions } from "./post-actions";
-import { Check, FileText, MessageSquare } from "lucide-react";
+import { Check, FileText, MessageSquare, ThumbsUp, MessageCircle, Repeat2, Send, Globe2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { WorkspaceLogo } from "@/components/settings/workspace-logo";
 
 /**
  * Client dashboard — the 30-second approval experience. Two queues now:
@@ -33,7 +34,8 @@ export default async function ClientDashboardPage() {
     );
   }
 
-  const { pendingMessages, pendingPosts, metrics, recentReplies } = data;
+  const { workspace, pendingMessages, pendingPosts, metrics, recentReplies } = data;
+  const primaryContact = workspace?.contacts?.[0] ?? null;
   const total = pendingMessages.length + pendingPosts.length;
 
   return (
@@ -71,9 +73,17 @@ export default async function ClientDashboardPage() {
               Posts for your LinkedIn feed
             </h2>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-4">
             {pendingPosts.map((p) => (
-              <PostApprovalCard key={p.id} post={p} />
+              <PostApprovalCard
+                key={p.id}
+                post={p}
+                workspaceName={workspace?.name ?? "Workspace"}
+                workspaceLogoUrl={workspace?.logoUrl ?? null}
+                workspaceAccentColor={workspace?.accentColor ?? null}
+                contactName={primaryContact?.fullName ?? user.name}
+                contactTitle={primaryContact?.title ?? null}
+              />
             ))}
           </div>
         </section>
@@ -151,50 +161,103 @@ type ClientHome = NonNullable<Awaited<ReturnType<typeof clientHomeData>>>;
 type PendingMessage = ClientHome["pendingMessages"][number];
 type PendingPost = ClientHome["pendingPosts"][number];
 
-function PostApprovalCard({ post }: { post: PendingPost }) {
+function PostApprovalCard({
+  post,
+  workspaceName,
+  workspaceLogoUrl,
+  workspaceAccentColor,
+  contactName,
+  contactTitle,
+}: {
+  post: PendingPost;
+  workspaceName: string;
+  workspaceLogoUrl: string | null;
+  workspaceAccentColor: string | null;
+  contactName: string;
+  contactTitle: string | null;
+}) {
   const waiting = formatDistanceToNow(post.updatedAt, { addSuffix: true });
   return (
-    <div className="rounded-[var(--radius-lg)] border bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)]">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs text-[var(--color-muted-foreground)]">
-            {post.title ? (
-              <>
-                <span className="font-medium text-[var(--color-charcoal)]">
-                  {post.title}
-                </span>{" "}
-                ·{" "}
-              </>
-            ) : null}
-            Drafted by {post.drafter.name} · submitted {waiting}
-          </div>
-          <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-[var(--color-charcoal-500)]">
-            {post.body}
-          </p>
-          {post.media && post.media.length > 0 ? (
-            <div
-              className={`mt-3 grid gap-1 overflow-hidden rounded-[var(--radius-md)] ${
-                post.media.length === 1 ? "grid-cols-1" : "grid-cols-2"
-              }`}
-            >
-              {post.media.map((m) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={m.id}
-                  src={m.url}
-                  alt={m.filename ?? "Attached image"}
-                  className={`w-full object-cover ${
-                    post.media.length === 1 ? "max-h-64" : "h-32"
-                  }`}
-                />
-              ))}
-            </div>
+    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] shadow-[var(--shadow-card)]">
+      {/* Submission meta strip — sits ABOVE the LinkedIn-style card so the
+          client knows who drafted it without polluting the preview. */}
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-virgil)] px-4 py-2">
+        <div className="text-[11px] text-[var(--color-muted-foreground)]">
+          {post.title ? (
+            <>
+              <span className="font-medium text-[var(--color-charcoal)]">
+                {post.title}
+              </span>{" "}
+              ·{" "}
+            </>
           ) : null}
+          Drafted by {post.drafter.name} · submitted {waiting}
         </div>
         <Badge variant="pending">Pending</Badge>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-4">
+      {/* The LinkedIn-feed card itself — white background, blue author name,
+          rounded image grid, like/comment/repost/send strip. Approximate but
+          close enough that the client sees what their followers will see. */}
+      <div className="bg-white p-4 sm:p-5">
+        <header className="flex items-start gap-3">
+          <WorkspaceLogo
+            name={workspaceName}
+            logoUrl={workspaceLogoUrl}
+            accentColor={workspaceAccentColor}
+            size="lg"
+            className="!h-12 !w-12 !rounded-full"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1 text-[15px] font-semibold text-[#0A66C2] hover:underline">
+              {contactName}
+            </div>
+            <div className="truncate text-xs text-[#666]">
+              {contactTitle ?? workspaceName}
+            </div>
+            <div className="flex items-center gap-1 text-[11px] text-[#666]">
+              now · <Globe2 className="h-3 w-3" />
+            </div>
+          </div>
+        </header>
+
+        <div className="mt-3 whitespace-pre-line break-words text-[14px] leading-relaxed text-[#191919]">
+          {post.body}
+        </div>
+
+        {post.media && post.media.length > 0 ? (
+          <div
+            className={`-mx-4 mt-3 grid gap-px overflow-hidden bg-[#dadbdc] sm:-mx-5 ${
+              post.media.length === 1 ? "grid-cols-1" : "grid-cols-2"
+            }`}
+          >
+            {post.media.map((m) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={m.id}
+                src={m.url}
+                alt={m.filename ?? "Attached image"}
+                className={`w-full object-cover ${
+                  post.media.length === 1 ? "max-h-[480px]" : "h-44"
+                }`}
+              />
+            ))}
+          </div>
+        ) : null}
+
+        {/* Reaction strip — visual only */}
+        <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-2 text-[#666]">
+          <FeedAction icon={ThumbsUp} label="Like" />
+          <FeedAction icon={MessageCircle} label="Comment" />
+          <FeedAction icon={Repeat2} label="Repost" />
+          <FeedAction icon={Send} label="Send" />
+        </div>
+      </div>
+
+      {/* Wilson's-themed approval action band — separate from the feed card
+          so the client clearly understands the difference between "this is
+          how it'll look" and "here's what to do about it". */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-virgil-dark)]/50 px-4 py-3">
         <form action={approvePost}>
           <input type="hidden" name="postId" value={post.id} />
           <Button type="submit" variant="accent" size="sm">
@@ -203,6 +266,21 @@ function PostApprovalCard({ post }: { post: PendingPost }) {
         </form>
         <PostApprovalActions postId={post.id} body={post.body} />
       </div>
+    </div>
+  );
+}
+
+function FeedAction({
+  icon: Icon,
+  label,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium hover:bg-gray-100">
+      <Icon className="h-4 w-4" />
+      {label}
     </div>
   );
 }
