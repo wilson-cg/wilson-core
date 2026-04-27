@@ -171,6 +171,25 @@ function PostApprovalCard({ post }: { post: PendingPost }) {
           <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-[var(--color-charcoal-500)]">
             {post.body}
           </p>
+          {post.media && post.media.length > 0 ? (
+            <div
+              className={`mt-3 grid gap-1 overflow-hidden rounded-[var(--radius-md)] ${
+                post.media.length === 1 ? "grid-cols-1" : "grid-cols-2"
+              }`}
+            >
+              {post.media.map((m) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={m.id}
+                  src={m.url}
+                  alt={m.filename ?? "Attached image"}
+                  className={`w-full object-cover ${
+                    post.media.length === 1 ? "max-h-64" : "h-32"
+                  }`}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
         <Badge variant="pending">Pending</Badge>
       </div>

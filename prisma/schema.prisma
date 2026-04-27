@@ -292,9 +292,31 @@ model Post {
   approver      User?         @relation("PostApprover", fields: [approverId], references: [id], onDelete: SetNull)
   poster        User?         @relation("PostPoster", fields: [posterId], references: [id], onDelete: SetNull)
   events        PostEvent[]
+  media         PostMedia[]
 
   @@index([workspaceId])
   @@index([status])
+}
+
+// Images / media attached to a post. Goes through the same approval flow
+// as the body — clients see attachments in the approval card and can
+// reject if anything's off.
+model PostMedia {
+  id           String     @id @default(cuid())
+  postId       String
+  // Data URL or external URL. Kept simple for v1 — swap to Cloudflare R2
+  // / Railway volume when files get bigger or volume increases.
+  url          String     @db.Text
+  filename     String?
+  contentType  String?
+  width        Int?
+  height       Int?
+  orderIndex   Int        @default(0)
+  createdAt    DateTime   @default(now())
+
+  post         Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
 }
 
 enum PostStatus {

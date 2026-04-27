@@ -1522,6 +1522,92 @@ const markPostedSchema = z.object({
   postedUrl: z.string().url().optional().or(z.literal("")),
 });
 
+/* ─── Post media (attachments) ──────────────────────────────── */
+
+const MAX_MEDIA_BYTES = 2 * 1024 * 1024; // 2 MB per attachment for v1
+
+const addMediaSchema = z.object({
+  postId: z.string().min(1),
+  dataUrl: z.string().min(1),
+  filename: z.string().optional(),
+  contentType: z.string().optional(),
+});
+
+export async function addPostMedia(formData: FormData) {
+  const parsed = addMediaSchema.parse({
+    postId: formData.get("postId"),
+    dataUrl: formData.get("dataUrl"),
+    filename: formData.get("filename") || undefined,
+    contentType: formData.get("contentType") || undefined,
+  });
+  const user = await requireUser();
+  if (user.role === "CLIENT") throw new Error("Clients cannot attach media");
+
+  const post = await prisma.post.findUnique({
+    where: { id: parsed.postId },
+    select: { id: true, workspaceId: true, status: true },
+  });
+  if (!post) throw new Error("Post not found");
+  if (!["DRAFT", "REJECTED"].includes(post.status)) {
+    throw new Error("Cannot attach media after submission");
+  }
+
+  // Crude size check on the data URL (base64 inflates by ~33%).
+  if (parsed.dataUrl.length > MAX_MEDIA_BYTES * 1.4) {
+    throw new Error("Image too large — max 2MB per file");
+  }
+
+  if (
+    parsed.contentType &&
+    !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+      parsed.contentType
+    )
+  ) {
+    throw new Error("Only PNG / JPEG / GIF / WEBP images are supported");
+  }
+
+  const max = await prisma.postMedia.aggregate({
+    where: { postId: parsed.postId },
+    _max: { orderIndex: true },
+  });
+
+  await prisma.postMedia.create({
+    data: {
+      postId: parsed.postId,
+      url: parsed.dataUrl,
+      filename: parsed.filename ?? null,
+      contentType: parsed.contentType ?? null,
+      orderIndex: (max._max.orderIndex ?? -1) + 1,
+    },
+  });
+
+  revalidatePath(`/dashboard/workspaces`);
+}
+
+const removeMediaSchema = z.object({
+  mediaId: z.string().min(1),
+});
+
+export async function removePostMedia(formData: FormData) {
+  const { mediaId } = removeMediaSchema.parse({
+    mediaId: formData.get("mediaId"),
+  });
+  const user = await requireUser();
+  if (user.role === "CLIENT") throw new Error("Clients cannot remove media");
+
+  const media = await prisma.postMedia.findUnique({
+    where: { id: mediaId },
+    include: { post: { select: { status: true } } },
+  });
+  if (!media) throw new Error("Media not found");
+  if (!["DRAFT", "REJECTED"].includes(media.post.status)) {
+    throw new Error("Cannot remove media after submission");
+  }
+
+  await prisma.postMedia.delete({ where: { id: mediaId } });
+  revalidatePath(`/dashboard/workspaces`);
+}
+
 export async function markPostAsPosted(formData: FormData) {
   const { postId, postedUrl } = markPostedSchema.parse({
     postId: formData.get("postId"),

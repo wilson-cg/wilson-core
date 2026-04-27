@@ -277,7 +277,10 @@ export async function clientHomeData(user: AuthedUser) {
     }),
     prisma.post.findMany({
       where: { workspaceId, status: "PENDING_APPROVAL" },
-      include: { drafter: true },
+      include: {
+        drafter: true,
+        media: { orderBy: { orderIndex: "asc" } },
+      },
       orderBy: { updatedAt: "asc" },
     }),
     prisma.message.count({
@@ -343,6 +346,7 @@ export async function postsForWorkspace(workspaceId: string) {
       drafter: true,
       approver: true,
       poster: true,
+      media: { orderBy: { orderIndex: "asc" } },
     },
     orderBy: { updatedAt: "desc" },
   });
@@ -363,11 +367,17 @@ export async function postDetail(postId: string) {
   return prisma.post.findUnique({
     where: { id: postId },
     include: {
-      workspace: { include: { icp: true } },
+      workspace: {
+        include: {
+          icp: true,
+          contacts: { where: { isPrimary: true } },
+        },
+      },
       drafter: true,
       approver: true,
       poster: true,
       events: { include: { actor: true }, orderBy: { createdAt: "asc" } },
+      media: { orderBy: { orderIndex: "asc" } },
     },
   });
 }
@@ -384,7 +394,11 @@ export async function pendingApprovalsUnified(user: AuthedUser) {
     }),
     prisma.post.findMany({
       where: { workspaceId: { in: workspaceIds }, status: "PENDING_APPROVAL" },
-      include: { workspace: true, drafter: true },
+      include: {
+        workspace: true,
+        drafter: true,
+        media: { orderBy: { orderIndex: "asc" } },
+      },
       orderBy: { updatedAt: "asc" },
     }),
   ]);

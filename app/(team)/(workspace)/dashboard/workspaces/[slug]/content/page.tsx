@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireRole, requireWorkspace } from "@/lib/auth";
 import { postsForWorkspace } from "@/lib/queries";
 import { Button } from "@/components/ui/button";
-import { Plus, Clock, Check, Radio, XCircle, PenLine, ArrowRight } from "lucide-react";
+import { Plus, Clock, Check, Radio, XCircle, PenLine, ArrowRight, Paperclip } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 /**
@@ -167,6 +167,8 @@ function Column({
 function PostCard({ post, slug, tone }: { post: Post; slug: string; tone: Tone }) {
   const styles = COLUMN_STYLES[tone];
   const preview = (post.body ?? "").split("\n").filter(Boolean).slice(0, 3);
+  const mediaCount = post.media?.length ?? 0;
+  const firstMedia = post.media?.[0];
 
   return (
     <Link
@@ -189,8 +191,26 @@ function PostCard({ post, slug, tone }: { post: Post; slug: string; tone: Tone }
           </p>
         ))}
       </div>
+      {firstMedia ? (
+        <div className="mt-2 overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-border)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={firstMedia.url}
+            alt={firstMedia.filename ?? "Attached"}
+            className="h-24 w-full object-cover"
+          />
+        </div>
+      ) : null}
       <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--color-muted-foreground)]">
-        <span>{post.drafter.name.split(" ")[0]}</span>
+        <span className="inline-flex items-center gap-1.5">
+          {post.drafter.name.split(" ")[0]}
+          {mediaCount > 0 ? (
+            <span className="inline-flex items-center gap-0.5">
+              <Paperclip className="h-2.5 w-2.5" />
+              {mediaCount}
+            </span>
+          ) : null}
+        </span>
         <span>{formatDistanceToNow(post.updatedAt, { addSuffix: true })}</span>
       </div>
     </Link>
