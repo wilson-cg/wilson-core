@@ -176,6 +176,9 @@ function renderHtml(p: {
   ctaUrl: string;
   workspaceName: string;
 }): string {
+  const appUrl = (process.env.APP_URL ?? APP_URL_DEFAULT).replace(/\/$/, "");
+  const wordmarkUrl = `${appUrl}/brand/wilsons-wordmark-light.svg`;
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -183,37 +186,47 @@ function renderHtml(p: {
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>${escape(p.headline)}</title>
 </head>
-<body style="margin:0;padding:0;background:${BRAND.virgil};font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.charcoal};">
-  <span style="display:none;visibility:hidden;mso-hide:all;font-size:0;color:${BRAND.virgil};line-height:0;max-height:0;overflow:hidden;">
+<body style="margin:0;padding:0;background:${BRAND.forest};font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.virgil};">
+  <span style="display:none;visibility:hidden;mso-hide:all;font-size:0;color:${BRAND.forest};line-height:0;max-height:0;overflow:hidden;">
     ${escape(p.preview)}
   </span>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.virgil};padding:32px 16px;">
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.forest};padding:40px 16px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;border:1px solid ${BRAND.border};box-shadow:0 1px 2px rgba(28,45,34,0.06);">
-          <!-- Header -->
+
+        <!-- Wordmark on the forest background -->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
           <tr>
-            <td style="padding:24px 28px 12px 28px;border-bottom:1px solid ${BRAND.border};">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="font-family:'Instrument Serif',Georgia,serif;font-size:22px;line-height:1;color:${BRAND.forest};letter-spacing:-0.01em;">
-                    Wilson&rsquo;s
-                  </td>
-                  <td align="right" style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:${BRAND.charcoal300};">
-                    ${escape(p.workspaceName)}
-                  </td>
-                </tr>
-              </table>
+            <td align="center">
+              <img
+                src="${escape(wordmarkUrl)}"
+                alt="Wilson's"
+                width="140"
+                style="display:block;width:140px;height:auto;border:0;outline:none;"
+              />
+            </td>
+          </tr>
+        </table>
+
+        <!-- Card -->
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;border:1px solid rgba(255,255,255,0.06);box-shadow:0 8px 28px rgba(0,0,0,0.18);">
+          <!-- Workspace ribbon -->
+          <tr>
+            <td style="padding:14px 28px;border-bottom:1px solid ${BRAND.border};background:${BRAND.virgil};border-radius:16px 16px 0 0;">
+              <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:${BRAND.charcoal300};">
+                ${escape(p.workspaceName)} · Approval needed
+              </span>
             </td>
           </tr>
 
           <!-- Body -->
           <tr>
-            <td style="padding:28px 28px 8px 28px;">
+            <td style="padding:28px 28px 8px 28px;background:#ffffff;">
               <p style="margin:0 0 6px 0;font-size:13px;color:${BRAND.charcoal300};">
                 Hi ${escape(p.contactFirstName)},
               </p>
-              <h1 style="margin:0 0 8px 0;font-family:'Instrument Serif',Georgia,serif;font-size:26px;line-height:1.15;color:${BRAND.forest};letter-spacing:-0.01em;">
+              <h1 style="margin:0 0 8px 0;font-family:'Instrument Serif',Georgia,serif;font-size:28px;line-height:1.15;color:${BRAND.forest};letter-spacing:-0.01em;">
                 ${escape(p.headline)}
               </h1>
               <p style="margin:0 0 20px 0;font-size:14px;line-height:1.55;color:${BRAND.charcoal500};">
@@ -222,7 +235,7 @@ function renderHtml(p: {
 
               ${
                 p.title
-                  ? `<p style="margin:0 0 8px 0;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:${BRAND.charcoal300};">Title</p>
+                  ? `<p style="margin:0 0 6px 0;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:${BRAND.charcoal300};">Title</p>
                      <p style="margin:0 0 16px 0;font-size:14px;color:${BRAND.charcoal};font-weight:500;">${escape(p.title)}</p>`
                   : ""
               }
@@ -230,7 +243,7 @@ function renderHtml(p: {
               <!-- Preview block -->
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
                 <tr>
-                  <td style="background:${BRAND.virgil};border:1px solid ${BRAND.border};border-radius:12px;padding:18px 20px;font-size:14px;line-height:1.55;color:${BRAND.charcoal};white-space:pre-wrap;">
+                  <td style="background:${BRAND.virgil};border:1px solid ${BRAND.border};border-radius:12px;padding:18px 20px;font-size:14px;line-height:1.6;color:${BRAND.charcoal};white-space:pre-wrap;">
                     ${escape(p.preview)}
                   </td>
                 </tr>
@@ -246,23 +259,24 @@ function renderHtml(p: {
                   </td>
                 </tr>
               </table>
-              <p style="margin:8px 0 0 0;font-size:12px;color:${BRAND.charcoal300};">
+              <p style="margin:10px 0 0 0;font-size:12px;color:${BRAND.charcoal300};">
                 Approve, edit, or reject from the page — your team gets notified instantly.
               </p>
             </td>
           </tr>
 
-          <!-- Footer -->
+          <!-- Card footer -->
           <tr>
-            <td style="padding:20px 28px 24px 28px;border-top:1px solid ${BRAND.border};font-size:11px;line-height:1.5;color:${BRAND.charcoal300};">
+            <td style="padding:18px 28px 22px 28px;border-top:1px solid ${BRAND.border};background:#ffffff;border-radius:0 0 16px 16px;font-size:11px;line-height:1.55;color:${BRAND.charcoal300};">
               You&rsquo;re receiving this because you&rsquo;re the approval contact for ${escape(p.workspaceName)} on the Wilson&rsquo;s portal.
               If you didn&rsquo;t expect it, just reply and we&rsquo;ll sort it out.
             </td>
           </tr>
         </table>
 
-        <p style="margin:16px 0 0 0;font-size:11px;color:${BRAND.charcoal300};">
-          Wilson&rsquo;s · Real people deserve real stories.
+        <!-- Tagline on forest -->
+        <p style="margin:20px 0 0 0;font-size:11px;color:rgba(249,245,238,0.55);letter-spacing:0.04em;">
+          Real people deserve real stories.
         </p>
       </td>
     </tr>
