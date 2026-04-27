@@ -29,10 +29,17 @@ export function LinkedInPreview({
   contactTitle: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const TRUNCATION_CHARS = 210;
-  const willTruncate = body.length > TRUNCATION_CHARS;
-  const visibleBody =
-    !expanded && willTruncate ? body.slice(0, TRUNCATION_CHARS).trimEnd() : body;
+  // LinkedIn truncates at whichever comes first:
+  //   - The first paragraph break (\n\n)
+  //   - ~140 chars on mobile / ~210 on desktop
+  // We use the more conservative 140-char + paragraph-break rule so the
+  // preview reflects what most readers will see in their feed.
+  const TRUNCATION_CHARS = 140;
+  const truncationPoint = computeTruncationPoint(body, TRUNCATION_CHARS);
+  const willTruncate = truncationPoint < body.length;
+  const visibleBody = !expanded && willTruncate
+    ? body.slice(0, truncationPoint).trimEnd()
+    : body;
 
   return (
     <div className="space-y-2">
@@ -138,6 +145,32 @@ export function LinkedInPreview({
       </div>
     </div>
   );
+}
+
+/**
+ * Find the LinkedIn truncation index for a body of text:
+ *   - The first paragraph break (\n\n) if it falls before maxChars + a
+ *     reasonable lookahead window, OR
+ *   - The last word boundary at or before maxChars, OR
+ *   - maxChars as a fallback
+ */
+function computeTruncationPoint(text: string, maxChars: number): number {
+  if (text.length <= maxChars) return text.length;
+
+  // Look ahead a bit past maxChars in case the natural paragraph break is
+  // just slightly past it — readers still see "see more" appear before the
+  // break, but we want the visual preview to fall on a sensible boundary.
+  const lookahead = maxChars + 60;
+  const paraBreak = text.indexOf("\n\n");
+  if (paraBreak !== -1 && paraBreak <= lookahead) {
+    return paraBreak;
+  }
+
+  // Fall back to the nearest word boundary at or before maxChars
+  const slice = text.slice(0, maxChars + 1);
+  const lastSpace = slice.lastIndexOf(" ");
+  if (lastSpace > maxChars * 0.6) return lastSpace;
+  return maxChars;
 }
 
 function Reaction({

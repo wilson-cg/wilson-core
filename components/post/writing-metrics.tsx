@@ -16,8 +16,11 @@ export function WritingMetrics({ body }: { body: string }) {
   const hashtags = (text.match(/#\w+/g) ?? []).length;
   const readMinutes = Math.max(1, Math.round(words / 200));
 
-  // Soft signals
-  const truncated = chars > 210;
+  // Soft signals — LinkedIn truncates at ~140 chars on mobile, the first
+  // paragraph break, whichever comes first. We treat anything past 140
+  // chars OR with an early \n\n as truncated for the warning.
+  const firstParaBreak = text.indexOf("\n\n");
+  const truncated = chars > 140 || (firstParaBreak !== -1 && firstParaBreak < chars);
   const tooShort = chars > 0 && chars < 200;
   const sweetSpot = chars >= 1200 && chars <= 1500;
   const tooLong = chars > 3000; // LinkedIn hard cap is 3000
@@ -43,8 +46,9 @@ export function WritingMetrics({ body }: { body: string }) {
         <div className="space-y-1.5 text-[11px]">
           {truncated ? (
             <Hint tone="info">
-              Will truncate after ~210 chars in the feed — readers click
-              &ldquo;see more&rdquo; to expand. The first 2 lines do the work.
+              Will truncate at ~140 chars on mobile (or the first paragraph
+              break) — readers click &ldquo;see more&rdquo; to expand. The
+              first line does the work.
             </Hint>
           ) : null}
           {sweetSpot ? (

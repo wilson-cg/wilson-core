@@ -43,6 +43,7 @@ export function ImprovementsSidebar({
   const [improvements, setImprovements] = useState<Improvement[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [tick, setTick] = useState(0); // bumped to force re-lint
 
   const linterRef = useRef<{
@@ -57,15 +58,35 @@ export function ImprovementsSidebar({
     let cancelled = false;
     (async () => {
       try {
-        const [{ WorkerLinter }, { binary }] = await Promise.all([
+        // Use the INLINED binary — embeds the WASM as a base64 data URL so
+        // we don't need any Next.js webpack/turbopack config to serve the
+        // raw .wasm file from node_modules. Costs us ~700 KB in bundle
+        // size on this page only (lazy-loaded).
+        const [{ WorkerLinter, Dialect }, { binaryInlined }] = await Promise.all([
           import("harper.js"),
-          import("harper.js/binary"),
+          import("harper.js/binaryInlined"),
         ]);
         if (cancelled) return;
-        const linter = new WorkerLinter({ binary });
+        const linter = new WorkerLinter({
+          binary: binaryInlined,
+          dialect: Dialect.American,
+        });
         await linter.setup();
         if (cancelled) return;
+        // Make absolutely sure the spelling rules are on. They're enabled
+        // by default in 2.x but configs can drift over versions.
+        try {
+          const cfg = await linter.getLintConfig();
+          await linter.setLintConfig({
+            ...cfg,
+            Misspell: true,
+            SpellCheck: true,
+          });
+        } catch {
+          /* fall back to defaults */
+        }
         linterRef.current = { linter, lints: [] };
+        setReady(true);
         setTick((t) => t + 1); // trigger initial lint
       } catch (e) {
         console.error("harper.js failed to load", e);
@@ -219,7 +240,8 @@ export function ImprovementsSidebar({
         ) : (
           <SentencePanel
             grouped={grouped}
-            loading={loading}
+            loading={loading || !ready}
+            ready={ready}
             empty={!text.trim()}
             onApply={applyImprovement}
           />
@@ -305,11 +327,13 @@ function ContentPanel({
 function SentencePanel({
   grouped,
   loading,
+  ready,
   empty,
   onApply,
 }: {
   grouped: [string, Improvement[]][];
   loading: boolean;
+  ready: boolean;
   empty: boolean;
   onApply: (imp: Improvement) => void;
 }) {
@@ -320,10 +344,11 @@ function SentencePanel({
       </p>
     );
   }
-  if (loading && grouped.length === 0) {
+  if (!ready || (loading && grouped.length === 0)) {
     return (
       <p className="flex items-center justify-center gap-2 px-2 py-8 text-xs text-[var(--color-muted-foreground)]">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking…
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        {ready ? "Checking…" : "Loading writing checker…"}
       </p>
     );
   }
