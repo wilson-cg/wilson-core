@@ -282,6 +282,7 @@ export async function submitForApproval(formData: FormData) {
   // Send the email outside the DB transaction so a slow / failed Resend
   // request doesn't roll back the state change.
   if (notificationId && recipientEmail) {
+    const approvalToken = await ensureApprovalToken(message.workspaceId);
     await dispatchApprovalEmail(notificationId, {
       to: recipientEmail,
       kind: "message",
@@ -291,6 +292,7 @@ export async function submitForApproval(formData: FormData) {
       preview: message.body,
       prospectName: message.prospect.fullName,
       prospectCompany: message.prospect.company,
+      pathOverride: `/approve/${approvalToken}`,
     });
   }
 
@@ -565,12 +567,38 @@ function slugify(name: string): string {
 }
 
 function generateOnboardingToken(): string {
-  // 32-char hex token. Collision probability is astronomically low (16^32).
-  // Stored unique on Workspace; token is the only thing needed to fill in
-  // that workspace's onboarding from outside the auth boundary.
+  return generatePublicToken();
+}
+
+/**
+ * 32-char hex token used to gate public, unauthenticated access to
+ * workspace-scoped surfaces (onboarding questionnaire, approval page).
+ * Collision probability is 1 in 16^32 — effectively zero.
+ */
+function generatePublicToken(): string {
   return Array.from({ length: 32 }, () =>
     Math.floor(Math.random() * 16).toString(16)
   ).join("");
+}
+
+/**
+ * Lazily create the workspace's approvalToken on first need. Used by
+ * the email-send path so existing workspaces (created before the
+ * approvalToken column existed) still get a working approval link.
+ */
+async function ensureApprovalToken(workspaceId: string): Promise<string> {
+  const existing = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { approvalToken: true },
+  });
+  if (existing?.approvalToken) return existing.approvalToken;
+
+  const token = generatePublicToken();
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { approvalToken: token },
+  });
+  return token;
 }
 
 export async function createClient(formData: FormData) {
@@ -595,6 +623,7 @@ export async function createClient(formData: FormData) {
       contactName: name.trim(), // placeholder until first contact added
       accentColor: "#17614F",
       onboardingToken: generateOnboardingToken(),
+      approvalToken: generatePublicToken(),
       onboarding: {
         create: DEFAULT_ONBOARDING_QUESTIONS.map((q, i) => ({
           question: q.question,
@@ -1464,6 +1493,7 @@ export async function submitPostForApproval(formData: FormData) {
   });
 
   if (notificationId && recipientEmail) {
+    const approvalToken = await ensureApprovalToken(post.workspaceId);
     await dispatchApprovalEmail(notificationId, {
       to: recipientEmail,
       kind: "post",
@@ -1473,6 +1503,7 @@ export async function submitPostForApproval(formData: FormData) {
       drafterName: post.drafter.name,
       preview: post.body,
       postTitle: post.title ?? undefined,
+      pathOverride: `/approve/${approvalToken}`,
     });
   }
 
@@ -1766,6 +1797,7 @@ export async function movePostToStage(formData: FormData) {
   // a notification. Outside the transaction so a slow Resend call doesn't
   // hold the row lock open.
   if (pendingNotificationId && recipientEmail) {
+    const approvalToken = await ensureApprovalToken(post.workspaceId);
     await dispatchApprovalEmail(pendingNotificationId, {
       to: recipientEmail,
       kind: "post",
@@ -1775,6 +1807,7 @@ export async function movePostToStage(formData: FormData) {
       drafterName: post.drafter.name,
       preview: post.body,
       postTitle: post.title ?? undefined,
+      pathOverride: `/approve/${approvalToken}`,
     });
   }
 
@@ -1949,4 +1982,343 @@ export async function markPostAsPosted(formData: FormData) {
   });
 
   revalidatePath(`/dashboard/workspaces`);
+}
+
+/* ─── Public token-scoped approval actions ───────────────────
+ *
+ * Backing the /approve/[token] page. The link inside the approval email
+ * carries the workspace's approvalToken; the client clicks through and
+ * approves / edits / rejects without needing a session. Security comes
+ * from:
+ *   1. Looking up the workspace by token (404 if invalid).
+ *   2. Verifying the post / message id belongs to THAT workspace.
+ *   3. Auditing the action against a real CLIENT user attached to the
+ *      workspace (or the next-best member) so the event log stays valid.
+ */
+
+async function findApprovalActor(workspaceId: string) {
+  // Prefer a CLIENT user who's a member of this workspace
+  const clientMember = await prisma.membership.findFirst({
+    where: { workspaceId, role: "CLIENT" },
+    include: { user: true },
+  });
+  if (clientMember) return clientMember.user;
+  // Fall back to any member (so audit trail still has a real userId)
+  const anyMember = await prisma.membership.findFirst({
+    where: { workspaceId },
+    include: { user: true },
+  });
+  if (anyMember) return anyMember.user;
+  throw new Error("Workspace has no users — can't record approval");
+}
+
+async function loadWorkspaceByToken(token: string) {
+  const workspace = await prisma.workspace.findUnique({
+    where: { approvalToken: token },
+    select: { id: true, slug: true },
+  });
+  if (!workspace) throw new Error("Invalid or expired approval link");
+  return workspace;
+}
+
+const tokenPostSchema = z.object({
+  token: z.string().min(8),
+  postId: z.string().min(1),
+});
+
+const tokenMessageSchema = z.object({
+  token: z.string().min(8),
+  messageId: z.string().min(1),
+});
+
+export async function approvePostByToken(formData: FormData) {
+  const { token, postId } = tokenPostSchema.parse({
+    token: formData.get("token"),
+    postId: formData.get("postId"),
+  });
+  const workspace = await loadWorkspaceByToken(token);
+  const post = await prisma.post.findUnique({ where: { id: postId } });
+  if (!post || post.workspaceId !== workspace.id) {
+    throw new Error("Post not found in this workspace");
+  }
+  if (post.status !== "PENDING_APPROVAL") {
+    throw new Error("Post not pending approval");
+  }
+  const actor = await findApprovalActor(workspace.id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.post.update({
+      where: { id: postId },
+      data: {
+        status: "APPROVED",
+        approverId: actor.id,
+        approvedAt: new Date(),
+        rejectionNote: null,
+      },
+    });
+    await tx.postEvent.create({
+      data: {
+        postId,
+        workspaceId: workspace.id,
+        actorId: actor.id,
+        eventType: "APPROVED",
+      },
+    });
+  });
+
+  revalidatePath(`/approve/${token}`);
+  revalidatePath(`/dashboard/workspaces/${workspace.slug}/content`);
+  revalidatePath("/dashboard/approvals");
+  revalidatePath("/client/dashboard");
+}
+
+export async function editAndApprovePostByToken(formData: FormData) {
+  const schema = tokenPostSchema.extend({
+    body: z.string().min(10),
+  });
+  const { token, postId, body } = schema.parse({
+    token: formData.get("token"),
+    postId: formData.get("postId"),
+    body: formData.get("body"),
+  });
+  const workspace = await loadWorkspaceByToken(token);
+  const post = await prisma.post.findUnique({ where: { id: postId } });
+  if (!post || post.workspaceId !== workspace.id) {
+    throw new Error("Post not found in this workspace");
+  }
+  if (post.status !== "PENDING_APPROVAL") {
+    throw new Error("Post not pending approval");
+  }
+  const actor = await findApprovalActor(workspace.id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.post.update({
+      where: { id: postId },
+      data: {
+        body,
+        version: { increment: 1 },
+        status: "APPROVED",
+        approverId: actor.id,
+        approvedAt: new Date(),
+        rejectionNote: null,
+      },
+    });
+    await tx.postEvent.create({
+      data: {
+        postId,
+        workspaceId: workspace.id,
+        actorId: actor.id,
+        eventType: "EDITED_AND_APPROVED",
+      },
+    });
+  });
+
+  revalidatePath(`/approve/${token}`);
+  revalidatePath(`/dashboard/workspaces/${workspace.slug}/content`);
+  revalidatePath("/dashboard/approvals");
+  revalidatePath("/client/dashboard");
+}
+
+export async function rejectPostByToken(formData: FormData) {
+  const schema = tokenPostSchema.extend({
+    note: z.string().min(3, "Tell the team what to change"),
+  });
+  const { token, postId, note } = schema.parse({
+    token: formData.get("token"),
+    postId: formData.get("postId"),
+    note: formData.get("note"),
+  });
+  const workspace = await loadWorkspaceByToken(token);
+  const post = await prisma.post.findUnique({ where: { id: postId } });
+  if (!post || post.workspaceId !== workspace.id) {
+    throw new Error("Post not found in this workspace");
+  }
+  if (post.status !== "PENDING_APPROVAL") {
+    throw new Error("Post not pending approval");
+  }
+  const actor = await findApprovalActor(workspace.id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.post.update({
+      where: { id: postId },
+      data: {
+        status: "REJECTED",
+        rejectionNote: note,
+        approverId: actor.id,
+        approvedAt: new Date(),
+      },
+    });
+    await tx.postEvent.create({
+      data: {
+        postId,
+        workspaceId: workspace.id,
+        actorId: actor.id,
+        eventType: "REJECTED",
+        metadata: JSON.stringify({ note }),
+      },
+    });
+  });
+
+  revalidatePath(`/approve/${token}`);
+  revalidatePath(`/dashboard/workspaces/${workspace.slug}/content`);
+  revalidatePath("/dashboard/approvals");
+  revalidatePath("/client/dashboard");
+}
+
+export async function approveMessageByToken(formData: FormData) {
+  const { token, messageId } = tokenMessageSchema.parse({
+    token: formData.get("token"),
+    messageId: formData.get("messageId"),
+  });
+  const workspace = await loadWorkspaceByToken(token);
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: { prospect: true },
+  });
+  if (!message || message.workspaceId !== workspace.id) {
+    throw new Error("Message not found in this workspace");
+  }
+  if (message.status !== "PENDING_APPROVAL") {
+    throw new Error("Message not pending approval");
+  }
+  const actor = await findApprovalActor(workspace.id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.message.update({
+      where: { id: messageId },
+      data: {
+        status: "APPROVED",
+        approverId: actor.id,
+        approvedAt: new Date(),
+      },
+    });
+    await tx.messageEvent.create({
+      data: {
+        messageId,
+        workspaceId: workspace.id,
+        actorId: actor.id,
+        eventType: "APPROVED",
+      },
+    });
+    if (shouldAdvance(message.prospect.status, "APPROVED")) {
+      await tx.prospect.update({
+        where: { id: message.prospectId },
+        data: { status: "APPROVED" },
+      });
+    }
+  });
+
+  revalidatePath(`/approve/${token}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/client/dashboard");
+}
+
+export async function editAndApproveMessageByToken(formData: FormData) {
+  const schema = tokenMessageSchema.extend({
+    body: z.string().min(10),
+  });
+  const { token, messageId, body } = schema.parse({
+    token: formData.get("token"),
+    messageId: formData.get("messageId"),
+    body: formData.get("body"),
+  });
+  const workspace = await loadWorkspaceByToken(token);
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: { prospect: true },
+  });
+  if (!message || message.workspaceId !== workspace.id) {
+    throw new Error("Message not found in this workspace");
+  }
+  if (message.status !== "PENDING_APPROVAL") {
+    throw new Error("Message not pending approval");
+  }
+  const actor = await findApprovalActor(workspace.id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.message.update({
+      where: { id: messageId },
+      data: {
+        body,
+        version: { increment: 1 },
+        status: "APPROVED",
+        approverId: actor.id,
+        approvedAt: new Date(),
+      },
+    });
+    await tx.messageEvent.create({
+      data: {
+        messageId,
+        workspaceId: workspace.id,
+        actorId: actor.id,
+        eventType: "EDITED_AND_APPROVED",
+      },
+    });
+    if (shouldAdvance(message.prospect.status, "APPROVED")) {
+      await tx.prospect.update({
+        where: { id: message.prospectId },
+        data: { status: "APPROVED" },
+      });
+    }
+  });
+
+  revalidatePath(`/approve/${token}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/client/dashboard");
+}
+
+export async function rejectMessageByToken(formData: FormData) {
+  const schema = tokenMessageSchema.extend({
+    note: z.string().min(3, "Tell the team what to change"),
+  });
+  const { token, messageId, note } = schema.parse({
+    token: formData.get("token"),
+    messageId: formData.get("messageId"),
+    note: formData.get("note"),
+  });
+  const workspace = await loadWorkspaceByToken(token);
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: { prospect: true },
+  });
+  if (!message || message.workspaceId !== workspace.id) {
+    throw new Error("Message not found in this workspace");
+  }
+  if (message.status !== "PENDING_APPROVAL") {
+    throw new Error("Message not pending approval");
+  }
+  const actor = await findApprovalActor(workspace.id);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.message.update({
+      where: { id: messageId },
+      data: {
+        status: "REJECTED",
+        rejectionNote: note,
+        approverId: actor.id,
+        approvedAt: new Date(),
+      },
+    });
+    await tx.messageEvent.create({
+      data: {
+        messageId,
+        workspaceId: workspace.id,
+        actorId: actor.id,
+        eventType: "REJECTED",
+        metadata: JSON.stringify({ note }),
+      },
+    });
+    // Only walk the prospect status back to MESSAGE_DRAFTED if it was at
+    // PENDING_APPROVAL because of THIS message.
+    if (message.prospect.status === "PENDING_APPROVAL") {
+      await tx.prospect.update({
+        where: { id: message.prospectId },
+        data: { status: "MESSAGE_DRAFTED" },
+      });
+    }
+  });
+
+  revalidatePath(`/approve/${token}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/client/dashboard");
 }

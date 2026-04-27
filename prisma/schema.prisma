@@ -82,6 +82,7 @@ model Workspace {
   linkedinUrl   String?      // Company LinkedIn page URL
   approvalEmail String?      // Override email for approval notifications. Falls back to primary contact's email.
   onboardingToken String?    @unique  // Public-shareable token unlocking /onboard/[token]. Scoped to this workspace only.
+  approvalToken   String?    @unique  // Public-shareable token unlocking /approve/[token]. Used in approval emails so clients can approve/reject without logging in. Scoped to this workspace only.
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
