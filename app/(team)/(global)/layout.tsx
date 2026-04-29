@@ -9,6 +9,7 @@ import {
   LogOut,
   Bell,
   Building2,
+  History,
 } from "lucide-react";
 import { requireRole } from "@/lib/auth";
 import { workspacesForTeamDashboard } from "@/lib/queries";
@@ -65,6 +66,11 @@ export default async function GlobalTeamLayout({
           <NavItemClient href="/dashboard/notifications" label="Notifications">
             <Bell className="h-4 w-4 shrink-0" />
           </NavItemClient>
+          {user.role === "ADMIN" ? (
+            <NavItemClient href="/dashboard/audit" label="Audit log">
+              <History className="h-4 w-4 shrink-0" />
+            </NavItemClient>
+          ) : null}
 
           <div className="mt-6 px-2 text-[11px] font-medium uppercase tracking-wider text-[var(--color-charcoal-300)]">
             Clients

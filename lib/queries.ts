@@ -450,6 +450,179 @@ export async function notificationOutbox(user: AuthedUser, limit = 50) {
   });
 }
 
+/* ─── Admin audit log ────────────────────────────────────────── */
+
+/**
+ * Admin-only unified audit log — merges ProspectEvent, MessageEvent, and
+ * PostEvent across every workspace into a single timeline. Filters apply
+ * uniformly across all three sources; results are sorted newest-first.
+ */
+export async function adminAuditLog(opts?: {
+  workspaceId?: string;
+  actorId?: string;
+  eventType?: string;
+  fromDate?: Date;
+  toDate?: Date;
+  limit?: number;
+}) {
+  const limit = opts?.limit ?? 200;
+  const workspaceFilter = opts?.workspaceId ? { workspaceId: opts.workspaceId } : {};
+  const actorFilter = opts?.actorId ? { actorId: opts.actorId } : {};
+  const typeFilter = opts?.eventType ? { eventType: opts.eventType as never } : {};
+
+  // ProspectEvent uses occurredAt as the canonical timestamp; the others
+  // only have createdAt. Filter both fields where applicable so the date
+  // range applies sensibly to every source.
+  const prospectDateFilter =
+    opts?.fromDate || opts?.toDate
+      ? {
+          occurredAt: {
+            ...(opts?.fromDate ? { gte: opts.fromDate } : {}),
+            ...(opts?.toDate ? { lte: opts.toDate } : {}),
+          },
+        }
+      : {};
+  const createdAtFilter =
+    opts?.fromDate || opts?.toDate
+      ? {
+          createdAt: {
+            ...(opts?.fromDate ? { gte: opts.fromDate } : {}),
+            ...(opts?.toDate ? { lte: opts.toDate } : {}),
+          },
+        }
+      : {};
+
+  const [prospectEvents, messageEvents, postEvents] = await Promise.all([
+    prisma.prospectEvent.findMany({
+      where: {
+        ...workspaceFilter,
+        ...actorFilter,
+        ...typeFilter,
+        ...prospectDateFilter,
+      },
+      include: {
+        actor: true,
+        workspace: true,
+        prospect: { select: { id: true, fullName: true } },
+      },
+      orderBy: { occurredAt: "desc" },
+      take: limit,
+    }),
+    prisma.messageEvent.findMany({
+      where: {
+        ...workspaceFilter,
+        ...actorFilter,
+        ...typeFilter,
+        ...createdAtFilter,
+      },
+      include: {
+        actor: true,
+        workspace: true,
+        message: {
+          select: {
+            id: true,
+            body: true,
+            prospect: { select: { id: true, fullName: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    }),
+    prisma.postEvent.findMany({
+      where: {
+        ...workspaceFilter,
+        ...actorFilter,
+        ...typeFilter,
+        ...createdAtFilter,
+      },
+      include: {
+        actor: true,
+        workspace: true,
+        post: { select: { id: true, title: true, body: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    }),
+  ]);
+
+  type Entry = {
+    id: string;
+    source: "prospect" | "message" | "post";
+    eventType: string;
+    actor: { id: string; name: string };
+    workspace: { id: string; name: string; slug: string };
+    occurredAt: Date;
+    target: { type: "prospect" | "message" | "post"; id: string; name: string };
+  };
+
+  const entries: Entry[] = [];
+
+  for (const e of prospectEvents) {
+    entries.push({
+      id: `p:${e.id}`,
+      source: "prospect",
+      eventType: e.eventType,
+      actor: { id: e.actor.id, name: e.actor.name },
+      workspace: { id: e.workspace.id, name: e.workspace.name, slug: e.workspace.slug },
+      occurredAt: e.occurredAt,
+      target: { type: "prospect", id: e.prospect.id, name: e.prospect.fullName },
+    });
+  }
+  for (const e of messageEvents) {
+    const preview = e.message.body.slice(0, 40);
+    entries.push({
+      id: `m:${e.id}`,
+      source: "message",
+      eventType: e.eventType,
+      actor: { id: e.actor.id, name: e.actor.name },
+      workspace: { id: e.workspace.id, name: e.workspace.name, slug: e.workspace.slug },
+      occurredAt: e.createdAt,
+      target: {
+        type: "message",
+        id: e.message.id,
+        name: `${e.message.prospect.fullName} — ${preview}`,
+      },
+    });
+  }
+  for (const e of postEvents) {
+    const preview = e.post.body.slice(0, 40);
+    entries.push({
+      id: `pe:${e.id}`,
+      source: "post",
+      eventType: e.eventType,
+      actor: { id: e.actor.id, name: e.actor.name },
+      workspace: { id: e.workspace.id, name: e.workspace.name, slug: e.workspace.slug },
+      occurredAt: e.createdAt,
+      target: {
+        type: "post",
+        id: e.post.id,
+        name: `${e.post.title ?? "Untitled"} — ${preview}`,
+      },
+    });
+  }
+
+  return entries
+    .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
+    .slice(0, limit);
+}
+
+/** Distinct actors and workspaces — used to populate audit log filter dropdowns. */
+export async function auditLogFilterOptions() {
+  const [workspaces, actors] = await Promise.all([
+    prisma.workspace.findMany({
+      select: { id: true, name: true, slug: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.user.findMany({
+      where: { role: { in: ["ADMIN", "TEAM_MEMBER", "CLIENT"] } },
+      select: { id: true, name: true, role: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  return { workspaces, actors };
+}
+
 /* ─── Helpers ────────────────────────────────────────────────── */
 
 function sevenDaysAgo() {
