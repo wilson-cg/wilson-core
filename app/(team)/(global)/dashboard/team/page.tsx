@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function TeamPage() {
   await requireRole("ADMIN");
 
-  const [users, invites] = await Promise.all([
+  const [users, invites, workspaces] = await Promise.all([
     prisma.user.findMany({
       orderBy: [{ role: "asc" }, { name: "asc" }],
       include: { memberships: { include: { workspace: true } } },
@@ -24,7 +24,15 @@ export default async function TeamPage() {
     prisma.invite.findMany({
       where: { acceptedAt: null },
       orderBy: { createdAt: "desc" },
-      include: { workspace: true, invitedBy: true },
+      include: {
+        workspace: true,
+        invitedBy: true,
+        workspaceAccesses: { include: { workspace: true } },
+      },
+    }),
+    prisma.workspace.findMany({
+      select: { id: true, name: true, slug: true },
+      orderBy: { name: "asc" },
     }),
   ]);
 
@@ -60,7 +68,7 @@ export default async function TeamPage() {
             collaboration.
           </p>
           <div className="mt-4">
-            <InviteTeammateForm />
+            <InviteTeammateForm workspaces={workspaces} />
           </div>
         </section>
 
@@ -89,6 +97,14 @@ export default async function TeamPage() {
                 <tbody className="divide-y divide-[var(--color-border)]">
                   {invites.map((inv) => {
                     const expired = inv.expiresAt.getTime() < Date.now();
+                    const accessLabels = inv.workspaceAccesses.map(
+                      (a) => `${a.workspace.name} (${a.workspaceRole})`,
+                    );
+                    const workspaceCell = inv.workspace?.name
+                      ? inv.workspace.name
+                      : accessLabels.length > 0
+                        ? accessLabels.join(", ")
+                        : "—";
                     return (
                       <tr key={inv.id}>
                         <td className="px-4 py-3 font-medium text-[var(--color-charcoal)]">
@@ -98,7 +114,7 @@ export default async function TeamPage() {
                           <Badge>{inv.systemRole}</Badge>
                         </td>
                         <td className="px-4 py-3 text-[var(--color-charcoal-300)]">
-                          {inv.workspace?.name ?? "—"}
+                          {workspaceCell}
                         </td>
                         <td className="px-4 py-3 text-[var(--color-charcoal-300)]">
                           {inv.invitedBy.name ?? inv.invitedBy.email}
