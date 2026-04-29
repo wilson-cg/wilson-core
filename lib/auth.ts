@@ -2,6 +2,7 @@ import NextAuth, { type DefaultSession } from "next-auth";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import Resend from "next-auth/providers/resend";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { prisma } from "./db";
 import { sendMagicLinkEmail } from "./email";
 import type { Membership, SystemRole, Workspace } from "@prisma/client";
@@ -183,7 +184,12 @@ export type AuthedUser = {
   memberships: MembershipWithWorkspace[];
 };
 
-export async function currentUser(): Promise<AuthedUser | null> {
+/**
+ * All four helpers are wrapped in React `cache()` so that within a single
+ * request the auth lookup + workspace lookup only hit the DB once, even
+ * when called from both a layout and the page underneath it.
+ */
+export const currentUser = cache(async (): Promise<AuthedUser | null> => {
   const session = await auth();
   const u = session?.user;
   if (!u?.id) return null;
@@ -194,31 +200,48 @@ export async function currentUser(): Promise<AuthedUser | null> {
     role: u.role,
     memberships: u.memberships ?? [],
   };
-}
+});
 
-export async function requireUser(): Promise<AuthedUser> {
+export const requireUser = cache(async (): Promise<AuthedUser> => {
   const user = await currentUser();
   if (!user) redirect("/login");
   return user;
-}
+});
 
-export async function requireRole(
-  ...roles: SystemRole[]
-): Promise<AuthedUser> {
-  const user = await requireUser();
-  if (!roles.includes(user.role)) {
-    redirect(user.role === "CLIENT" ? "/client/dashboard" : "/dashboard");
+export const requireRole = cache(
+  async (...roles: SystemRole[]): Promise<AuthedUser> => {
+    const user = await requireUser();
+    if (!roles.includes(user.role)) {
+      redirect(user.role === "CLIENT" ? "/client/dashboard" : "/dashboard");
+    }
+    return user;
   }
-  return user;
-}
+);
 
-export async function requireWorkspace(slug: string) {
+/**
+ * Workspace access guard. Returns the user, a slim workspace row (just the
+ * fields layout chrome and most pages actually need), and the user's
+ * membership if any. Pages that need icp / membership lists / contacts
+ * should issue a separate scoped query (workspaceSettings(), etc.) — this
+ * helper deliberately stays light because it runs on every workspace
+ * navigation.
+ */
+export const requireWorkspace = cache(async (slug: string) => {
   const user = await requireUser();
   const workspace = await prisma.workspace.findUnique({
     where: { slug },
-    include: {
-      memberships: { include: { user: true } },
-      icp: true,
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      contactName: true,
+      logoUrl: true,
+      accentColor: true,
+      businessName: true,
+      linkedinUrl: true,
+      approvalEmail: true,
+      onboardingToken: true,
+      approvalToken: true,
     },
   });
   if (!workspace) redirect("/dashboard");
@@ -233,7 +256,7 @@ export async function requireWorkspace(slug: string) {
   }
 
   return { user, workspace, membership };
-}
+});
 
 /**
  * Compatibility shim — older code imported `clearSession` from here. We keep

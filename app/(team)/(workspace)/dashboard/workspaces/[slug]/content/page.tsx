@@ -38,8 +38,8 @@ export default async function ContentPage({
     status: p.status,
     drafterName: p.drafter.name,
     updatedAt: p.updatedAt.toISOString(),
-    mediaCount: p.media?.length ?? 0,
-    firstMediaUrl: p.media?.[0]?.url ?? null,
+    mediaCount: p._count.media,
+    firstMediaUrl: p.media[0]?.url ?? null,
   }));
 
   // Posts shown in active stages (DRAFT/PENDING/APPROVED/POSTED) — exclude REJECTED
