@@ -7,6 +7,16 @@ import { prisma } from "./db";
 import { requireUser, requireWorkspace } from "./auth";
 import { sendApprovalEmail, type ApprovalEmailOptions } from "./email";
 import { enforceTokenRateLimit } from "./rate-limit";
+import {
+  revalidateApprovals,
+  revalidateClientHome,
+  revalidatePostApprovalChange,
+  revalidateMessageApprovalChange,
+  revalidateTeamHome,
+  revalidateWorkspaceContent,
+  revalidateWorkspaceProspectDetail,
+  revalidateWorkspaceProspects,
+} from "./revalidate";
 
 /**
  * All server actions for the Wilson's portal. Each one:
@@ -164,6 +174,7 @@ export async function draftMessage(formData: FormData) {
 
   const prospect = await prisma.prospect.findUnique({
     where: { id: parsed.prospectId },
+    include: { workspace: { select: { slug: true } } },
   });
   if (!prospect) throw new Error("Prospect not found");
 
@@ -193,7 +204,10 @@ export async function draftMessage(formData: FormData) {
     }
   });
 
-  revalidatePath(`/dashboard/workspaces`);
+  // Drafts only show up on the prospect detail and the prospects list. They
+  // don't change the team home counts (DRAFT isn't pending) or the client
+  // surface (clients don't see drafts).
+  revalidateWorkspaceProspectDetail(prospect.workspace.slug, prospect.id);
 }
 
 export async function updateDraft(formData: FormData) {
@@ -207,7 +221,10 @@ export async function updateDraft(formData: FormData) {
   });
 
   const user = await requireUser();
-  const message = await prisma.message.findUnique({ where: { id: messageId } });
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: { workspace: { select: { slug: true } } },
+  });
   if (!message || message.status !== "DRAFT") {
     throw new Error("Message not editable");
   }
@@ -217,7 +234,7 @@ export async function updateDraft(formData: FormData) {
     data: { body, version: { increment: 1 } },
   });
 
-  revalidatePath(`/dashboard/prospects/${message.prospectId}`);
+  revalidateWorkspaceProspectDetail(message.workspace.slug, message.prospectId);
 }
 
 export async function submitForApproval(formData: FormData) {
@@ -297,9 +314,8 @@ export async function submitForApproval(formData: FormData) {
     });
   }
 
-  revalidatePath(`/dashboard/prospects/${message.prospectId}`);
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/approvals");
+  revalidateMessageApprovalChange(message.workspace.slug, message.prospectId);
+  revalidateTeamHome();
 }
 
 /* ─── Client approval actions ────────────────────────────────── */
@@ -310,7 +326,10 @@ export async function approveMessage(formData: FormData) {
 
   const message = await prisma.message.findUnique({
     where: { id: messageId },
-    include: { prospect: true },
+    include: {
+      prospect: true,
+      workspace: { select: { slug: true } },
+    },
   });
   if (!message || message.status !== "PENDING_APPROVAL") {
     throw new Error("Message not pending approval");
@@ -341,8 +360,8 @@ export async function approveMessage(formData: FormData) {
     }
   });
 
-  revalidatePath("/client/dashboard");
-  revalidatePath("/dashboard");
+  revalidateMessageApprovalChange(message.workspace.slug, message.prospectId);
+  revalidateTeamHome();
 }
 
 export async function editAndApprove(formData: FormData) {
@@ -358,7 +377,10 @@ export async function editAndApprove(formData: FormData) {
   const user = await requireUser();
   const message = await prisma.message.findUnique({
     where: { id: messageId },
-    include: { prospect: true },
+    include: {
+      prospect: true,
+      workspace: { select: { slug: true } },
+    },
   });
   if (!message || message.status !== "PENDING_APPROVAL") {
     throw new Error("Message not pending approval");
@@ -391,8 +413,8 @@ export async function editAndApprove(formData: FormData) {
     }
   });
 
-  revalidatePath("/client/dashboard");
-  revalidatePath("/dashboard");
+  revalidateMessageApprovalChange(message.workspace.slug, message.prospectId);
+  revalidateTeamHome();
 }
 
 export async function rejectMessage(formData: FormData) {
@@ -408,7 +430,10 @@ export async function rejectMessage(formData: FormData) {
   const user = await requireUser();
   const message = await prisma.message.findUnique({
     where: { id: messageId },
-    include: { prospect: true },
+    include: {
+      prospect: true,
+      workspace: { select: { slug: true } },
+    },
   });
   if (!message || message.status !== "PENDING_APPROVAL") {
     throw new Error("Message not pending approval");
@@ -444,8 +469,8 @@ export async function rejectMessage(formData: FormData) {
     }
   });
 
-  revalidatePath("/client/dashboard");
-  revalidatePath("/dashboard");
+  revalidateMessageApprovalChange(message.workspace.slug, message.prospectId);
+  revalidateTeamHome();
 }
 
 /* ─── Team send + reply tracking ─────────────────────────────── */
@@ -457,7 +482,10 @@ export async function markAsSent(formData: FormData) {
 
   const message = await prisma.message.findUnique({
     where: { id: messageId },
-    include: { prospect: true },
+    include: {
+      prospect: true,
+      workspace: { select: { slug: true } },
+    },
   });
   if (!message || message.status !== "APPROVED") {
     throw new Error("Message not approved");
@@ -490,7 +518,11 @@ export async function markAsSent(formData: FormData) {
     });
   });
 
-  revalidatePath(`/dashboard/workspaces`);
+  // Sent doesn't change anything visible to the client — only the team
+  // prospect surfaces and the home activity feed.
+  revalidateWorkspaceProspectDetail(message.workspace.slug, message.prospectId);
+  revalidateWorkspaceProspects(message.workspace.slug);
+  revalidateTeamHome();
 }
 
 export async function markAsReplied(formData: FormData) {
@@ -500,7 +532,10 @@ export async function markAsReplied(formData: FormData) {
 
   const message = await prisma.message.findUnique({
     where: { id: messageId },
-    include: { prospect: true },
+    include: {
+      prospect: true,
+      workspace: { select: { slug: true } },
+    },
   });
   if (!message || message.status !== "SENT") {
     throw new Error("Message not sent");
@@ -527,7 +562,9 @@ export async function markAsReplied(formData: FormData) {
     }
   });
 
-  revalidatePath(`/dashboard/workspaces`);
+  revalidateWorkspaceProspectDetail(message.workspace.slug, message.prospectId);
+  revalidateWorkspaceProspects(message.workspace.slug);
+  revalidateTeamHome();
 }
 
 export async function markMeetingBooked(formData: FormData) {
@@ -535,15 +572,19 @@ export async function markMeetingBooked(formData: FormData) {
   const user = await requireUser();
   if (user.role === "CLIENT") throw new Error("Clients cannot update status");
 
-  const prospect = await prisma.prospect.findUnique({ where: { id: prospectId } });
+  const prospect = await prisma.prospect.findUnique({
+    where: { id: prospectId },
+    include: { workspace: { select: { slug: true } } },
+  });
   if (!prospect) throw new Error("Prospect not found");
 
   await prisma.prospect.update({
     where: { id: prospectId },
     data: { status: "MEETING_BOOKED" },
   });
-  revalidatePath(`/dashboard/prospects/${prospectId}`);
-  revalidatePath("/dashboard");
+  revalidateWorkspaceProspectDetail(prospect.workspace.slug, prospectId);
+  revalidateWorkspaceProspects(prospect.workspace.slug);
+  revalidateTeamHome();
 }
 
 import { DEFAULT_ONBOARDING_QUESTIONS } from "./default-onboarding";
@@ -1213,6 +1254,7 @@ export async function moveProspectToStage(formData: FormData) {
 
   const prospect = await prisma.prospect.findUnique({
     where: { id: prospectId },
+    include: { workspace: { select: { slug: true } } },
   });
   if (!prospect) throw new Error("Prospect not found");
 
@@ -1236,7 +1278,8 @@ export async function moveProspectToStage(formData: FormData) {
     });
   });
 
-  revalidatePath(`/dashboard/workspaces`);
+  revalidateWorkspaceProspects(prospect.workspace.slug);
+  revalidateWorkspaceProspectDetail(prospect.workspace.slug, prospectId);
 }
 
 function humanStage(stage: string) {
@@ -1265,6 +1308,7 @@ export async function updateProspectContactDates(formData: FormData) {
 
   const prospect = await prisma.prospect.findUnique({
     where: { id: parsed.prospectId },
+    include: { workspace: { select: { slug: true } } },
   });
   if (!prospect) throw new Error("Prospect not found");
 
@@ -1280,7 +1324,7 @@ export async function updateProspectContactDates(formData: FormData) {
     },
   });
 
-  revalidatePath(`/dashboard/workspaces/${prospect.workspaceId}/prospects`);
+  revalidateWorkspaceProspectDetail(prospect.workspace.slug, parsed.prospectId);
 }
 
 const updateProspectInfoSchema = z.object({
@@ -1314,6 +1358,7 @@ export async function updateProspectInfo(formData: FormData) {
 
   const prospect = await prisma.prospect.findUnique({
     where: { id: parsed.prospectId },
+    include: { workspace: { select: { slug: true } } },
   });
   if (!prospect) throw new Error("Prospect not found");
 
@@ -1334,7 +1379,8 @@ export async function updateProspectInfo(formData: FormData) {
     },
   });
 
-  revalidatePath(`/dashboard/workspaces/${prospect.workspaceId}/prospects`);
+  revalidateWorkspaceProspectDetail(prospect.workspace.slug, parsed.prospectId);
+  revalidateWorkspaceProspects(prospect.workspace.slug);
 }
 
 const logActivitySchema = z.object({
@@ -1366,6 +1412,7 @@ export async function logProspectActivity(formData: FormData) {
 
   const prospect = await prisma.prospect.findUnique({
     where: { id: parsed.prospectId },
+    include: { workspace: { select: { slug: true } } },
   });
   if (!prospect) throw new Error("Prospect not found");
 
@@ -1399,7 +1446,7 @@ export async function logProspectActivity(formData: FormData) {
     }
   });
 
-  revalidatePath(`/dashboard/workspaces/${prospect.workspaceId}/prospects`);
+  revalidateWorkspaceProspectDetail(prospect.workspace.slug, parsed.prospectId);
 }
 
 /* ─── POSTS (content pipeline) ──────────────────────────────── */
@@ -1459,7 +1506,10 @@ export async function updatePostDraft(formData: FormData) {
   const user = await requireUser();
   if (user.role === "CLIENT") throw new Error("Clients cannot edit drafts");
 
-  const post = await prisma.post.findUnique({ where: { id: parsed.postId } });
+  const post = await prisma.post.findUnique({
+    where: { id: parsed.postId },
+    include: { workspace: { select: { slug: true } } },
+  });
   if (!post || !["DRAFT", "REJECTED"].includes(post.status)) {
     throw new Error("Post not editable in current state");
   }
@@ -1483,7 +1533,9 @@ export async function updatePostDraft(formData: FormData) {
     });
   });
 
-  revalidatePath(`/dashboard/workspaces`);
+  // Drafts are team-only; client never sees them and they don't change
+  // dashboard counts. Just refresh the content kanban.
+  revalidateWorkspaceContent(post.workspace.slug);
 }
 
 export async function submitPostForApproval(formData: FormData) {
@@ -1554,15 +1606,17 @@ export async function submitPostForApproval(formData: FormData) {
     });
   }
 
-  revalidatePath(`/dashboard/workspaces/${post.workspace.slug}/content`);
-  revalidatePath("/dashboard/approvals");
-  revalidatePath("/client/dashboard");
+  revalidatePostApprovalChange(post.workspace.slug);
+  revalidateTeamHome();
 }
 
 export async function approvePost(formData: FormData) {
   const postId = z.string().min(1).parse(formData.get("postId"));
   const user = await requireUser();
-  const post = await prisma.post.findUnique({ where: { id: postId } });
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { workspace: { select: { slug: true } } },
+  });
   if (!post || post.status !== "PENDING_APPROVAL")
     throw new Error("Post not pending approval");
 
@@ -1581,9 +1635,8 @@ export async function approvePost(formData: FormData) {
     });
   });
 
-  revalidatePath("/client/dashboard");
-  revalidatePath("/dashboard/approvals");
-  revalidatePath(`/dashboard/workspaces`);
+  revalidatePostApprovalChange(post.workspace.slug);
+  revalidateTeamHome();
 }
 
 const editApprovePostSchema = z.object({
@@ -1597,7 +1650,10 @@ export async function editAndApprovePost(formData: FormData) {
     body: formData.get("body"),
   });
   const user = await requireUser();
-  const post = await prisma.post.findUnique({ where: { id: postId } });
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { workspace: { select: { slug: true } } },
+  });
   if (!post || post.status !== "PENDING_APPROVAL")
     throw new Error("Post not pending approval");
 
@@ -1622,9 +1678,8 @@ export async function editAndApprovePost(formData: FormData) {
     });
   });
 
-  revalidatePath("/client/dashboard");
-  revalidatePath("/dashboard/approvals");
-  revalidatePath(`/dashboard/workspaces`);
+  revalidatePostApprovalChange(post.workspace.slug);
+  revalidateTeamHome();
 }
 
 const rejectPostSchema = z.object({
@@ -1638,7 +1693,10 @@ export async function rejectPost(formData: FormData) {
     note: formData.get("note"),
   });
   const user = await requireUser();
-  const post = await prisma.post.findUnique({ where: { id: postId } });
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { workspace: { select: { slug: true } } },
+  });
   if (!post || post.status !== "PENDING_APPROVAL")
     throw new Error("Post not pending approval");
 
@@ -1663,9 +1721,8 @@ export async function rejectPost(formData: FormData) {
     });
   });
 
-  revalidatePath("/client/dashboard");
-  revalidatePath("/dashboard/approvals");
-  revalidatePath(`/dashboard/workspaces`);
+  revalidatePostApprovalChange(post.workspace.slug);
+  revalidateTeamHome();
 }
 
 const markPostedSchema = z.object({
@@ -1858,9 +1915,8 @@ export async function movePostToStage(formData: FormData) {
     });
   }
 
-  revalidatePath(`/dashboard/workspaces/${post.workspace.slug}/content`);
-  revalidatePath("/dashboard/approvals");
-  revalidatePath("/client/dashboard");
+  revalidatePostApprovalChange(post.workspace.slug);
+  revalidateTeamHome();
 }
 
 /* ─── Post media (attachments) ──────────────────────────────── */
@@ -1886,7 +1942,12 @@ export async function addPostMedia(formData: FormData) {
 
   const post = await prisma.post.findUnique({
     where: { id: parsed.postId },
-    select: { id: true, workspaceId: true, status: true },
+    select: {
+      id: true,
+      workspaceId: true,
+      status: true,
+      workspace: { select: { slug: true } },
+    },
   });
   if (!post) throw new Error("Post not found");
   if (!["DRAFT", "REJECTED"].includes(post.status)) {
@@ -1922,7 +1983,9 @@ export async function addPostMedia(formData: FormData) {
     },
   });
 
-  revalidatePath(`/dashboard/workspaces`);
+  // Media on a draft only matters in the team content kanban; client
+  // doesn't see drafts.
+  revalidateWorkspaceContent(post.workspace.slug);
 }
 
 const removeMediaSchema = z.object({
@@ -1938,7 +2001,14 @@ export async function removePostMedia(formData: FormData) {
 
   const media = await prisma.postMedia.findUnique({
     where: { id: mediaId },
-    include: { post: { select: { status: true } } },
+    include: {
+      post: {
+        select: {
+          status: true,
+          workspace: { select: { slug: true } },
+        },
+      },
+    },
   });
   if (!media) throw new Error("Media not found");
   if (!["DRAFT", "REJECTED"].includes(media.post.status)) {
@@ -1946,7 +2016,7 @@ export async function removePostMedia(formData: FormData) {
   }
 
   await prisma.postMedia.delete({ where: { id: mediaId } });
-  revalidatePath(`/dashboard/workspaces`);
+  revalidateWorkspaceContent(media.post.workspace.slug);
 }
 
 /* ─── Delete a post ─────────────────────────────────────────── */
@@ -2004,7 +2074,10 @@ export async function markPostAsPosted(formData: FormData) {
   const user = await requireUser();
   if (user.role === "CLIENT") throw new Error("Clients cannot mark posted");
 
-  const post = await prisma.post.findUnique({ where: { id: postId } });
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { workspace: { select: { slug: true } } },
+  });
   if (!post || post.status !== "APPROVED")
     throw new Error("Post not approved");
 
@@ -2028,7 +2101,11 @@ export async function markPostAsPosted(formData: FormData) {
     });
   });
 
-  revalidatePath(`/dashboard/workspaces`);
+  // Going live affects the team content kanban + the client home metric
+  // (Posts live count) + team home (recent activity).
+  revalidateWorkspaceContent(post.workspace.slug);
+  revalidateClientHome();
+  revalidateTeamHome();
 }
 
 /* ─── Public token-scoped approval actions ───────────────────
