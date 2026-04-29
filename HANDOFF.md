@@ -602,6 +602,64 @@ Based on the flow of the session, plausible next-up features:
 
 ---
 
+### Migration adoption strategy
+
+The project switched from `prisma db push --accept-data-loss` (run on every Railway boot)
+to real Prisma migrations on 2026-04-29. Two migration folders ship in `prisma/migrations/`:
+
+- `0_init/` — full snapshot of the pre-auth schema. This matches what Railway prod
+  already had on disk from previous `db push` runs. NO new SQL is run for it on prod.
+- `1_auth_and_invites/` — the delta added by Auth.js v5 + the `Invite` model:
+  adds `Account`, `Session`, `VerificationToken`, `Invite` tables, plus three new
+  columns on `User` (`emailVerified`, `image`, and dropping NOT NULL on `name`).
+
+**For local dev / fresh Postgres**:
+```bash
+npx prisma migrate deploy   # applies both migrations cleanly
+npx prisma generate
+```
+
+**For Railway prod (which already had the pre-auth schema applied via `db push`)**:
+the adoption was a one-time, manual two-step:
+
+1. Take a Railway DB backup (Railway dashboard → Postgres → Backups → "Take backup now").
+2. From a local shell with Railway's public DATABASE_URL, mark `0_init` as already
+   applied (no SQL run — just inserts a row into `_prisma_migrations`):
+   ```bash
+   DATABASE_URL=<railway_public_url> npx prisma migrate resolve --applied 0_init
+   ```
+3. Then run `migrate deploy`. It sees `0_init` is satisfied and applies only
+   `1_auth_and_invites`:
+   ```bash
+   DATABASE_URL=<railway_public_url> npx prisma migrate deploy
+   ```
+
+**What was actually run on 2026-04-29 against Railway:**
+```
+$ npx prisma migrate resolve --applied 0_init
+Migration 0_init marked as applied.
+
+$ npx prisma migrate deploy
+2 migrations found in prisma/migrations
+Applying migration `1_auth_and_invites`
+The following migration(s) have been applied:
+migrations/
+  └─ 1_auth_and_invites/
+    └─ migration.sql
+All migrations have been successfully applied.
+```
+
+After that, `npm start` on Railway runs `prisma migrate deploy && next start`,
+which is now a no-op until a new migration lands. New migrations should be created
+locally with `npx prisma migrate dev --name <description>` and committed to git;
+the next Railway boot will apply them.
+
+**Do NOT run `prisma migrate dev` against Railway prod** — it can rewrite history.
+Use `migrate dev` only against a local/scratch DB; commit the generated SQL; let
+prod pick it up via `migrate deploy`.
+
+---
+
 ## Final notes for an agent picking this up
 
 - **Read `lib/actions.ts` first.** It's the heart of the app. ~1000 lines
