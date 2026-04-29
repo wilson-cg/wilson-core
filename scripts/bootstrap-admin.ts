@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { Resend } from "resend";
 
 const email = process.argv[2];
@@ -8,7 +9,13 @@ if (!email) {
   process.exit(1);
 }
 
-const prisma = new PrismaClient();
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  console.error("DATABASE_URL is not set. Run with --env-file=.env or export it.");
+  process.exit(1);
+}
+const adapter = new PrismaPg({ connectionString: databaseUrl });
+const prisma = new PrismaClient({ adapter });
 const resend = process.env.AUTH_RESEND_KEY ? new Resend(process.env.AUTH_RESEND_KEY) : null;
 const APP_URL = process.env.AUTH_URL ?? process.env.APP_URL ?? "http://localhost:3000";
 const TTL_DAYS = 7;
