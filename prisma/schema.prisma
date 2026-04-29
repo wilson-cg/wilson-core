@@ -111,9 +111,29 @@ model Invite {
   acceptedAt    DateTime?
   createdAt     DateTime       @default(now())
 
+  workspaceAccesses InviteWorkspaceAccess[]
+
   @@index([email])
   @@index([workspaceId])
   @@index([token])
+}
+
+// Multi-workspace invite access. Lets the /dashboard/team flow grant a
+// teammate N memberships at invite time. Legacy single-workspace invites
+// (Invite.workspaceId/workspaceRole) still work — events.createUser fans
+// both shapes into Membership rows.
+model InviteWorkspaceAccess {
+  id            String         @id @default(cuid())
+  inviteId      String
+  workspaceId   String
+  workspaceRole WorkspaceRole
+
+  invite        Invite         @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([inviteId, workspaceId])
+  @@index([inviteId])
+  @@index([workspaceId])
 }
 
 enum SystemRole {
@@ -172,6 +192,7 @@ model Workspace {
   contacts       ClientContact[]
   onboarding     OnboardingResponse[]
   invites        Invite[]
+  inviteAccesses InviteWorkspaceAccess[]
 }
 
 model Icp {

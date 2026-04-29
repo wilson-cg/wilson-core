@@ -36,6 +36,18 @@ const createInviteSchema = z.object({
   systemRole: z.enum(["ADMIN", "TEAM_MEMBER", "CLIENT"]),
   workspaceId: z.string().min(1).optional(),
   workspaceRole: z.enum(["ADMIN", "TEAM_MEMBER", "CLIENT"]).optional(),
+  // Multi-workspace access list. Used by the /dashboard/team flow when
+  // inviting a TEAM_MEMBER who should already have access to N workspaces
+  // on first sign-in. Existing single-workspace invites (workspaceId +
+  // workspaceRole above) are unchanged for the workspace settings flow.
+  workspaceAccesses: z
+    .array(
+      z.object({
+        workspaceId: z.string().min(1),
+        workspaceRole: z.enum(["ADMIN", "TEAM_MEMBER", "CLIENT"]),
+      }),
+    )
+    .optional(),
 });
 
 export type CreateInviteInput = z.infer<typeof createInviteSchema>;
@@ -81,8 +93,23 @@ async function _createInvite(
     workspaceName = ws.name;
   }
 
+  // Validate workspaceAccesses (de-dup by workspaceId, confirm each workspace exists).
+  const accesses = parsed.workspaceAccesses ?? [];
+  const dedupedAccesses = Array.from(
+    new Map(accesses.map((a) => [a.workspaceId, a])).values(),
+  );
+  if (dedupedAccesses.length > 0) {
+    const found = await prisma.workspace.findMany({
+      where: { id: { in: dedupedAccesses.map((a) => a.workspaceId) } },
+      select: { id: true },
+    });
+    if (found.length !== dedupedAccesses.length) {
+      throw new Error("One or more workspace accesses point to missing workspaces.");
+    }
+  }
+
   // Drop any existing un-accepted invites for the same email so resends
-  // don't pile up duplicates.
+  // don't pile up duplicates. (Cascades to InviteWorkspaceAccess via FK.)
   await prisma.invite.deleteMany({
     where: { email, acceptedAt: null },
   });
@@ -97,6 +124,14 @@ async function _createInvite(
       workspaceRole: (parsed.workspaceRole as WorkspaceRole | undefined) ?? null,
       invitedById,
       expiresAt: newExpiry(),
+      workspaceAccesses: dedupedAccesses.length
+        ? {
+            create: dedupedAccesses.map((a) => ({
+              workspaceId: a.workspaceId,
+              workspaceRole: a.workspaceRole as WorkspaceRole,
+            })),
+          }
+        : undefined,
     },
   });
 

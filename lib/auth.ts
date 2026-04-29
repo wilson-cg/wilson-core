@@ -111,6 +111,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           expiresAt: { gt: new Date() },
         },
         orderBy: { createdAt: "desc" },
+        include: { workspaceAccesses: true },
       });
       if (!invite) return;
 
@@ -141,6 +142,25 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
               userId,
               workspaceId: invite.workspaceId,
               role: invite.workspaceRole,
+            },
+          });
+        }
+        // Multi-workspace accesses (from the /dashboard/team flow). Each
+        // entry becomes a Membership row. Upsert is idempotent for legacy
+        // invites that happened to also set workspaceId — no duplicates.
+        for (const access of invite.workspaceAccesses) {
+          await tx.membership.upsert({
+            where: {
+              userId_workspaceId: {
+                userId,
+                workspaceId: access.workspaceId,
+              },
+            },
+            update: { role: access.workspaceRole },
+            create: {
+              userId,
+              workspaceId: access.workspaceId,
+              role: access.workspaceRole,
             },
           });
         }
