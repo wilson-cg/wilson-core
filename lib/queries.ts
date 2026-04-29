@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "./db";
 import type { AuthedUser } from "./auth";
 
@@ -7,14 +8,20 @@ import type { AuthedUser } from "./auth";
  * results. One place for the scoping guard — pages just call these.
  */
 
-/** Workspace ids the user can see. ADMIN sees all; others only their memberships. */
-export async function accessibleWorkspaceIds(user: AuthedUser): Promise<string[]> {
-  if (user.role === "ADMIN") {
-    const all = await prisma.workspace.findMany({ select: { id: true } });
-    return all.map((w) => w.id);
+/**
+ * Workspace ids the user can see. ADMIN sees all; others only their
+ * memberships. Cached per-request so a page that calls multiple scoped
+ * queries (dashboard, approvals) only issues one workspace lookup.
+ */
+export const accessibleWorkspaceIds = cache(
+  async (user: AuthedUser): Promise<string[]> => {
+    if (user.role === "ADMIN") {
+      const all = await prisma.workspace.findMany({ select: { id: true } });
+      return all.map((w) => w.id);
+    }
+    return user.memberships.map((m) => m.workspaceId);
   }
-  return user.memberships.map((m) => m.workspaceId);
-}
+);
 
 /* ─── Team dashboard queries ─────────────────────────────────── */
 
@@ -62,6 +69,40 @@ export async function teamDashboardSummary(user: AuthedUser) {
   };
 }
 
+/**
+ * Slim sidebar list — used by the team layout chrome which renders on every
+ * navigation. Only `id`, `slug`, `name`, and a pending count. Avoids the
+ * dashboard's heavier joins so layout transitions stay fast.
+ */
+export const teamSidebarWorkspaces = cache(async (user: AuthedUser) => {
+  const workspaceIds = await accessibleWorkspaceIds(user);
+  const rows = await prisma.workspace.findMany({
+    where: { id: { in: workspaceIds } },
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      _count: {
+        select: {
+          messages: { where: { status: "PENDING_APPROVAL" } },
+          posts: { where: { status: "PENDING_APPROVAL" } },
+        },
+      },
+    },
+    orderBy: { name: "asc" },
+  });
+  return rows.map((w) => ({
+    id: w.id,
+    slug: w.slug,
+    name: w.name,
+    pending: w._count.messages + w._count.posts,
+  }));
+});
+
+/**
+ * Full dashboard cards — heavier, only used by the home page. Includes
+ * contact, logo, accent color, and last-activity timestamp.
+ */
 export async function workspacesForTeamDashboard(user: AuthedUser) {
   const workspaceIds = await accessibleWorkspaceIds(user);
   const workspaces = await prisma.workspace.findMany({
@@ -116,12 +157,21 @@ export async function recentActivity(user: AuthedUser, limit = 8) {
 export async function prospectsForWorkspace(workspaceId: string) {
   return prisma.prospect.findMany({
     where: { workspaceId },
-    include: {
+    select: {
+      id: true,
+      fullName: true,
+      company: true,
+      title: true,
+      status: true,
+      fitScore: true,
+      updatedAt: true,
+      assigneeId: true,
+      assignee: { select: { id: true, name: true } },
       messages: {
         orderBy: { createdAt: "desc" },
         take: 1,
+        select: { status: true },
       },
-      assignee: true,
     },
     orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
   });
@@ -234,24 +284,6 @@ export async function prospectTimeline(prospectId: string) {
   return entries.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
 }
 
-/* ─── Approval queue (team cross-workspace) ──────────────────── */
-
-export async function pendingApprovals(user: AuthedUser) {
-  const workspaceIds = await accessibleWorkspaceIds(user);
-  return prisma.message.findMany({
-    where: {
-      workspaceId: { in: workspaceIds },
-      status: "PENDING_APPROVAL",
-    },
-    include: {
-      prospect: true,
-      workspace: true,
-      drafter: true,
-    },
-    orderBy: { updatedAt: "asc" },
-  });
-}
-
 /* ─── Client-side queries ────────────────────────────────────── */
 
 export async function clientHomeData(user: AuthedUser) {
@@ -343,29 +375,32 @@ export async function clientMessageForApproval(messageId: string, user: AuthedUs
 
 /* ─── Posts (content pipeline) ───────────────────────────────── */
 
-/** Kanban-ready: all posts in a workspace grouped by status. */
+/**
+ * Slim list for the content kanban / list page. Drops approver/poster and
+ * the full media array — only `mediaCount` + the first media url are
+ * actually rendered. The page does its own status grouping in-memory.
+ */
 export async function postsForWorkspace(workspaceId: string) {
   const posts = await prisma.post.findMany({
     where: { workspaceId },
-    include: {
-      drafter: true,
-      approver: true,
-      poster: true,
-      media: { orderBy: { orderIndex: "asc" } },
+    select: {
+      id: true,
+      title: true,
+      body: true,
+      status: true,
+      updatedAt: true,
+      drafter: { select: { name: true } },
+      _count: { select: { media: true } },
+      media: {
+        orderBy: { orderIndex: "asc" },
+        take: 1,
+        select: { url: true },
+      },
     },
     orderBy: { updatedAt: "desc" },
   });
 
-  return {
-    all: posts,
-    byStatus: {
-      DRAFT: posts.filter((p) => p.status === "DRAFT"),
-      PENDING_APPROVAL: posts.filter((p) => p.status === "PENDING_APPROVAL"),
-      APPROVED: posts.filter((p) => p.status === "APPROVED"),
-      POSTED: posts.filter((p) => p.status === "POSTED"),
-      REJECTED: posts.filter((p) => p.status === "REJECTED"),
-    },
-  };
+  return { all: posts };
 }
 
 export async function postDetail(postId: string) {

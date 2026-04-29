@@ -13,7 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import { requireRole } from "@/lib/auth";
-import { workspacesForTeamDashboard } from "@/lib/queries";
+import { teamSidebarWorkspaces } from "@/lib/queries";
 import { logout } from "@/app/(auth)/login/actions";
 import { NavItemClient } from "@/app/(team)/nav-item";
 
@@ -28,7 +28,7 @@ export default async function GlobalTeamLayout({
   children: React.ReactNode;
 }) {
   const user = await requireRole("ADMIN", "TEAM_MEMBER");
-  const workspaces = await workspacesForTeamDashboard(user);
+  const workspaces = await teamSidebarWorkspaces(user);
 
   return (
     <div className="flex min-h-screen bg-[var(--color-background)]">

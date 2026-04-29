@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useOptimistic, useTransition, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useOptimistic,
+  useTransition,
+  useRef,
+  useState,
+} from "react";
 import { formatDistanceToNow } from "date-fns";
 import {
   DndContext,
@@ -130,6 +137,21 @@ export function ContentKanban({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
+  // Group once per render instead of doing a full filter pass per stage.
+  const itemsByStage = useMemo(() => {
+    const groups: Record<StageKey, KanbanPost[]> = {
+      DRAFT: [],
+      PENDING_APPROVAL: [],
+      APPROVED: [],
+      POSTED: [],
+    };
+    for (const p of optimistic) {
+      const key = p.status as StageKey;
+      if (groups[key]) groups[key].push(p);
+    }
+    return groups;
+  }, [optimistic]);
+
   function handleDragStart(e: DragStartEvent) {
     const id = String(e.active.id);
     setDraggingId(id);
@@ -185,7 +207,7 @@ export function ContentKanban({
           }`}
         >
           {STAGES.map((s) => {
-            const items = optimistic.filter((p) => p.status === s.key);
+            const items = itemsByStage[s.key];
             const isLive = s.key === "POSTED";
             return (
               <Column

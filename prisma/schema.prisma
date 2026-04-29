@@ -20,8 +20,8 @@ datasource db {
 // ─── Users & access ─────────────────────────────────────────────
 
 model User {
-  id            String       @id @default(cuid())
-  email         String       @unique
+  id            String     @id @default(cuid())
+  email         String     @unique
   // Auth.js standard fields. We make `name` optional to satisfy the Prisma
   // adapter contract (Auth.js may create rows from email-only sign-in before
   // the user picks a name). `emailVerified` and `image` are required by the
@@ -29,24 +29,24 @@ model User {
   name          String?
   emailVerified DateTime?
   image         String?
-  role          SystemRole   @default(CLIENT)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  role          SystemRole @default(CLIENT)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
-  memberships   Membership[]
-  accounts      Account[]
-  sessions      Session[]
-  invitesSent   Invite[]      @relation("InviteSender")
+  memberships Membership[]
+  accounts    Account[]
+  sessions    Session[]
+  invitesSent Invite[]     @relation("InviteSender")
 
-  draftedMessages  Message[] @relation("Drafter")
-  approvedMessages Message[] @relation("Approver")
-  sentMessages     Message[] @relation("Sender")
-  assignedProspects Prospect[] @relation("Assignee")
-  events        MessageEvent[]
+  draftedMessages   Message[]      @relation("Drafter")
+  approvedMessages  Message[]      @relation("Approver")
+  sentMessages      Message[]      @relation("Sender")
+  assignedProspects Prospect[]     @relation("Assignee")
+  events            MessageEvent[]
 
-  draftedPosts  Post[] @relation("PostDrafter")
-  approvedPosts Post[] @relation("PostApprover")
-  postedPosts   Post[] @relation("PostPoster")
+  draftedPosts  Post[]      @relation("PostDrafter")
+  approvedPosts Post[]      @relation("PostApprover")
+  postedPosts   Post[]      @relation("PostPoster")
   postEvents    PostEvent[]
 
   prospectEvents ProspectEvent[]
@@ -123,13 +123,13 @@ model Invite {
 // (Invite.workspaceId/workspaceRole) still work — events.createUser fans
 // both shapes into Membership rows.
 model InviteWorkspaceAccess {
-  id            String         @id @default(cuid())
+  id            String        @id @default(cuid())
   inviteId      String
   workspaceId   String
   workspaceRole WorkspaceRole
 
-  invite        Invite         @relation(fields: [inviteId], references: [id], onDelete: Cascade)
-  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invite    Invite    @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([inviteId, workspaceId])
   @@index([inviteId])
@@ -137,9 +137,9 @@ model InviteWorkspaceAccess {
 }
 
 enum SystemRole {
-  ADMIN         // Wilson's agency admin
-  TEAM_MEMBER   // Wilson's team member
-  CLIENT        // External client user
+  ADMIN // Wilson's agency admin
+  TEAM_MEMBER // Wilson's team member
+  CLIENT // External client user
 }
 
 model Membership {
@@ -149,42 +149,43 @@ model Membership {
   role        WorkspaceRole
   createdAt   DateTime      @default(now())
 
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([userId, workspaceId])
   @@index([workspaceId])
   @@index([userId])
+  @@index([workspaceId, role])
 }
 
 enum WorkspaceRole {
-  ADMIN         // Wilson's admin (full access, all workspaces — membership grants access)
-  TEAM_MEMBER   // Wilson's team member assigned to this workspace
-  CLIENT        // Client user (their own workspace only)
+  ADMIN // Wilson's admin (full access, all workspaces — membership grants access)
+  TEAM_MEMBER // Wilson's team member assigned to this workspace
+  CLIENT // Client user (their own workspace only)
 }
 
 // ─── Workspaces ─────────────────────────────────────────────────
 
 model Workspace {
-  id            String       @id @default(cuid())
-  name          String       // Display name (e.g. "Condor Group")
-  slug          String       @unique
-  businessName  String?      // Legal business name if different from display name
-  contactName   String       // Cached primary contact name (denormalized from ClientContact, for display)
-  accentColor   String?      // Optional white-label accent
-  logoUrl       String?      // URL or data: URL of the client's logo
-  linkedinUrl   String?      // Company LinkedIn page URL
-  approvalEmail String?      // Override email for approval notifications. Falls back to primary contact's email.
-  onboardingToken String?    @unique  // Public-shareable token unlocking /onboard/[token]. Scoped to this workspace only.
-  approvalToken   String?    @unique  // Public-shareable token unlocking /approve/[token]. Used in approval emails so clients can approve/reject without logging in. Scoped to this workspace only.
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  id              String   @id @default(cuid())
+  name            String // Display name (e.g. "Condor Group")
+  slug            String   @unique
+  businessName    String? // Legal business name if different from display name
+  contactName     String // Cached primary contact name (denormalized from ClientContact, for display)
+  accentColor     String? // Optional white-label accent
+  logoUrl         String? // URL or data: URL of the client's logo
+  linkedinUrl     String? // Company LinkedIn page URL
+  approvalEmail   String? // Override email for approval notifications. Falls back to primary contact's email.
+  onboardingToken String?  @unique // Public-shareable token unlocking /onboard/[token]. Scoped to this workspace only.
+  approvalToken   String?  @unique // Public-shareable token unlocking /approve/[token]. Used in approval emails so clients can approve/reject without logging in. Scoped to this workspace only.
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  memberships   Membership[]
-  prospects     Prospect[]
-  messages      Message[]
-  events        MessageEvent[]
-  icp           Icp?
+  memberships    Membership[]
+  prospects      Prospect[]
+  messages       Message[]
+  events         MessageEvent[]
+  icp            Icp?
   posts          Post[]
   postEvents     PostEvent[]
   notifications  Notification[]
@@ -196,45 +197,46 @@ model Workspace {
 }
 
 model Icp {
-  id             String     @id @default(cuid())
-  workspaceId    String     @unique
-  summary        String     // Ideal customer summary (free text)
-  toneOfVoice    String     // Tone + dos/donts as markdown
-  mustNotDo      String     // Comma-separated must-nots
-  updatedAt      DateTime   @updatedAt
+  id          String   @id @default(cuid())
+  workspaceId String   @unique
+  summary     String // Ideal customer summary (free text)
+  toneOfVoice String // Tone + dos/donts as markdown
+  mustNotDo   String // Comma-separated must-nots
+  updatedAt   DateTime @updatedAt
 
-  workspace      Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 // ─── Prospects ──────────────────────────────────────────────────
 
 model Prospect {
-  id                   String         @id @default(cuid())
-  workspaceId          String
-  fullName             String
-  linkedinUrl          String
-  company              String
-  title                String?
-  email                String?        // Optional; many prospects won't have an email known
-  location             String?        // Freeform city / region
-  tags                 String?        // Comma-separated for v1 simplicity
-  fitScore             FitScore       @default(POSSIBLE)
-  status               ProspectStatus @default(IDENTIFIED)
-  assigneeId           String?
-  notes                String?        // Internal-only free text
-  linkedinConnectedAt  DateTime?      // When we connected with them on LinkedIn
-  lastContactedAt      DateTime?      // Last outbound contact (editable, overrides derived)
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
+  id                  String         @id @default(cuid())
+  workspaceId         String
+  fullName            String
+  linkedinUrl         String
+  company             String
+  title               String?
+  email               String? // Optional; many prospects won't have an email known
+  location            String? // Freeform city / region
+  tags                String? // Comma-separated for v1 simplicity
+  fitScore            FitScore       @default(POSSIBLE)
+  status              ProspectStatus @default(IDENTIFIED)
+  assigneeId          String?
+  notes               String? // Internal-only free text
+  linkedinConnectedAt DateTime? // When we connected with them on LinkedIn
+  lastContactedAt     DateTime? // Last outbound contact (editable, overrides derived)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
-  workspace            Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  assignee             User?           @relation("Assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  messages             Message[]
-  events               ProspectEvent[]
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignee  User?           @relation("Assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  messages  Message[]
+  events    ProspectEvent[]
 
   @@index([workspaceId])
   @@index([status])
   @@index([assigneeId])
+  @@index([workspaceId, status, updatedAt])
 }
 
 // ─── Prospect activity timeline ────────────────────────────────
@@ -242,21 +244,22 @@ model Prospect {
 // LinkedIn connections, external calls/emails, manual notes, custom logs.
 
 model ProspectEvent {
-  id           String            @id @default(cuid())
-  prospectId   String
-  workspaceId  String
-  actorId      String
-  eventType    ProspectEventType
-  note         String?
-  occurredAt   DateTime          // Real-world date the event happened
-  createdAt    DateTime          @default(now())
+  id          String            @id @default(cuid())
+  prospectId  String
+  workspaceId String
+  actorId     String
+  eventType   ProspectEventType
+  note        String?
+  occurredAt  DateTime // Real-world date the event happened
+  createdAt   DateTime          @default(now())
 
-  prospect     Prospect          @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-  workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  actor        User              @relation(fields: [actorId], references: [id])
+  prospect  Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User      @relation(fields: [actorId], references: [id])
 
   @@index([prospectId])
   @@index([workspaceId])
+  @@index([prospectId, occurredAt])
 }
 
 enum ProspectEventType {
@@ -292,60 +295,66 @@ enum ProspectStatus {
 // ─── Messages ───────────────────────────────────────────────────
 
 model Message {
-  id            String         @id @default(cuid())
+  id            String        @id @default(cuid())
   workspaceId   String
   prospectId    String
   body          String
-  status        MessageStatus  @default(DRAFT)
-  version       Int            @default(1)
+  status        MessageStatus @default(DRAFT)
+  version       Int           @default(1)
   drafterId     String
-  approverId    String?        // Client user who approved
+  approverId    String? // Client user who approved
   approvedAt    DateTime?
-  senderId      String?        // Team member who marked sent
+  senderId      String? // Team member who marked sent
   sentAt        DateTime?
-  repliedAt     DateTime?      // Set when team marks replied
-  rejectionNote String?        // Client's rejection note if any
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  repliedAt     DateTime? // Set when team marks replied
+  rejectionNote String? // Client's rejection note if any
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  prospect      Prospect       @relation(fields: [prospectId], references: [id], onDelete: Cascade)
-  drafter       User           @relation("Drafter", fields: [drafterId], references: [id])
-  approver      User?          @relation("Approver", fields: [approverId], references: [id], onDelete: SetNull)
-  sender        User?          @relation("Sender", fields: [senderId], references: [id], onDelete: SetNull)
-  events        MessageEvent[]
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  prospect  Prospect       @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  drafter   User           @relation("Drafter", fields: [drafterId], references: [id])
+  approver  User?          @relation("Approver", fields: [approverId], references: [id], onDelete: SetNull)
+  sender    User?          @relation("Sender", fields: [senderId], references: [id], onDelete: SetNull)
+  events    MessageEvent[]
 
   @@index([workspaceId])
   @@index([prospectId])
   @@index([status])
+  @@index([workspaceId, status, updatedAt])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, approvedAt])
+  @@index([workspaceId, sentAt])
+  @@index([workspaceId, repliedAt])
 }
 
 enum MessageStatus {
-  DRAFT             // Team is still working on it
-  PENDING_APPROVAL  // Submitted to client
-  APPROVED          // Client approved
-  REJECTED          // Client rejected (with note)
-  SENT              // Team marked sent
-  REPLIED           // Team marked replied
+  DRAFT // Team is still working on it
+  PENDING_APPROVAL // Submitted to client
+  APPROVED // Client approved
+  REJECTED // Client rejected (with note)
+  SENT // Team marked sent
+  REPLIED // Team marked replied
 }
 
 // ─── Audit trail ────────────────────────────────────────────────
 
 model MessageEvent {
-  id           String       @id @default(cuid())
-  messageId    String
-  workspaceId  String
-  actorId      String
-  eventType    EventType
-  metadata     String?      // JSON blob for diffs, notes, etc.
-  createdAt    DateTime     @default(now())
+  id          String    @id @default(cuid())
+  messageId   String
+  workspaceId String
+  actorId     String
+  eventType   EventType
+  metadata    String? // JSON blob for diffs, notes, etc.
+  createdAt   DateTime  @default(now())
 
-  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  actor        User         @relation(fields: [actorId], references: [id])
+  message   Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User      @relation(fields: [actorId], references: [id])
 
   @@index([messageId])
   @@index([workspaceId])
+  @@index([workspaceId, eventType, createdAt])
 }
 
 enum EventType {
@@ -367,51 +376,53 @@ enum EventType {
 // feed, not about a specific prospect.
 
 model Post {
-  id            String        @id @default(cuid())
+  id            String     @id @default(cuid())
   workspaceId   String
-  title         String?       // Internal label only, not posted
+  title         String? // Internal label only, not posted
   body          String
-  status        PostStatus    @default(DRAFT)
-  version       Int           @default(1)
+  status        PostStatus @default(DRAFT)
+  version       Int        @default(1)
   drafterId     String
   approverId    String?
   approvedAt    DateTime?
-  posterId      String?       // Team member who confirmed the post went up
+  posterId      String? // Team member who confirmed the post went up
   postedAt      DateTime?
-  postedUrl     String?       // Optional link to the actual LinkedIn post
+  postedUrl     String? // Optional link to the actual LinkedIn post
   rejectionNote String?
-  scheduledFor  DateTime?     // Optional target date
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  scheduledFor  DateTime? // Optional target date
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
-  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  drafter       User          @relation("PostDrafter", fields: [drafterId], references: [id])
-  approver      User?         @relation("PostApprover", fields: [approverId], references: [id], onDelete: SetNull)
-  poster        User?         @relation("PostPoster", fields: [posterId], references: [id], onDelete: SetNull)
-  events        PostEvent[]
-  media         PostMedia[]
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  drafter   User        @relation("PostDrafter", fields: [drafterId], references: [id])
+  approver  User?       @relation("PostApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  poster    User?       @relation("PostPoster", fields: [posterId], references: [id], onDelete: SetNull)
+  events    PostEvent[]
+  media     PostMedia[]
 
   @@index([workspaceId])
   @@index([status])
+  @@index([workspaceId, status, updatedAt])
+  @@index([workspaceId, postedAt])
 }
 
 // Images / media attached to a post. Goes through the same approval flow
 // as the body — clients see attachments in the approval card and can
 // reject if anything's off.
 model PostMedia {
-  id           String     @id @default(cuid())
-  postId       String
+  id          String   @id @default(cuid())
+  postId      String
   // Data URL or external URL. Kept simple for v1 — swap to Cloudflare R2
   // / Railway volume when files get bigger or volume increases.
-  url          String     @db.Text
-  filename     String?
-  contentType  String?
-  width        Int?
-  height       Int?
-  orderIndex   Int        @default(0)
-  createdAt    DateTime   @default(now())
+  url         String   @db.Text
+  filename    String?
+  contentType String?
+  width       Int?
+  height      Int?
+  orderIndex  Int      @default(0)
+  createdAt   DateTime @default(now())
 
-  post         Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId])
 }
@@ -425,20 +436,21 @@ enum PostStatus {
 }
 
 model PostEvent {
-  id           String         @id @default(cuid())
-  postId       String
-  workspaceId  String
-  actorId      String
-  eventType    PostEventType
-  metadata     String?
-  createdAt    DateTime       @default(now())
+  id          String        @id @default(cuid())
+  postId      String
+  workspaceId String
+  actorId     String
+  eventType   PostEventType
+  metadata    String?
+  createdAt   DateTime      @default(now())
 
-  post         Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
-  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  actor        User           @relation(fields: [actorId], references: [id])
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User      @relation(fields: [actorId], references: [id])
 
   @@index([postId])
   @@index([workspaceId])
+  @@index([workspaceId, eventType, createdAt])
 }
 
 enum PostEventType {
@@ -459,19 +471,19 @@ enum PostEventType {
 // can see the notification would fire.
 
 model Notification {
-  id            String              @id @default(cuid())
-  workspaceId   String
-  channel       NotificationChannel
-  recipient     String              // email address or @handle
-  subject       String
-  body          String
-  relatedType   String?             // "message" | "post"
-  relatedId     String?
-  status        NotificationStatus  @default(QUEUED)
-  sentAt        DateTime?
-  createdAt     DateTime            @default(now())
+  id          String              @id @default(cuid())
+  workspaceId String
+  channel     NotificationChannel
+  recipient   String // email address or @handle
+  subject     String
+  body        String
+  relatedType String? // "message" | "post"
+  relatedId   String?
+  status      NotificationStatus  @default(QUEUED)
+  sentAt      DateTime?
+  createdAt   DateTime            @default(now())
 
-  workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
   @@index([status])
@@ -494,19 +506,20 @@ enum NotificationStatus {
 // default approval recipient if workspace.approvalEmail isn't set.
 
 model ClientContact {
-  id            String    @id @default(cuid())
-  workspaceId   String
-  fullName      String
-  title         String?
-  email         String?
-  linkedinUrl   String?
-  isPrimary     Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id          String   @id @default(cuid())
+  workspaceId String
+  fullName    String
+  title       String?
+  email       String?
+  linkedinUrl String?
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
+  @@index([workspaceId, isPrimary, createdAt])
 }
 
 // Onboarding questionnaire — Q&A rows per workspace, edited like a sheet.
@@ -514,28 +527,29 @@ model ClientContact {
 // reordered/edited freely afterwards.
 
 model OnboardingResponse {
-  id            String                @id @default(cuid())
+  id            String              @id @default(cuid())
   workspaceId   String
   question      String
   // For TEXT/LONGTEXT/URL/NUMBER: plain string. For SINGLE_CHOICE: the
   // selected option label. For MULTI_CHOICE: a JSON array of selected
   // option labels (e.g. ["Direct","Warm","Funny"]).
   answer        String?
-  fieldType     OnboardingFieldType   @default(LONGTEXT)
+  fieldType     OnboardingFieldType @default(LONGTEXT)
   // Pipe-separated list of options for SINGLE_CHOICE / MULTI_CHOICE.
   // Null for free-text fields.
   options       String?
   // For MULTI_CHOICE — minimum / maximum number of selectable options.
   minSelections Int?
   maxSelections Int?
-  orderIndex    Int                   @default(0)
-  required      Boolean               @default(false)
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  orderIndex    Int                 @default(0)
+  required      Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
-  workspace     Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
+  @@index([workspaceId, orderIndex])
 }
 
 enum OnboardingFieldType {
