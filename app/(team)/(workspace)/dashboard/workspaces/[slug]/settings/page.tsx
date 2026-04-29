@@ -3,6 +3,7 @@ import { requireRole, requireWorkspace } from "@/lib/auth";
 import { workspaceSettings } from "@/lib/queries";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { ContactsSection } from "@/components/settings/contacts-section";
+import { MembersSection } from "@/components/settings/members-section";
 import { OnboardingSection } from "@/components/settings/onboarding-section";
 import { DangerZone } from "@/components/settings/danger-zone";
 
@@ -44,6 +45,8 @@ export default async function WorkspaceSettingsPage({
         />
 
         <ContactsSection slug={slug} contacts={data.contacts} />
+
+        <MembersSection workspaceId={workspace.id} workspaceSlug={slug} />
 
         <OnboardingSection
           slug={slug}

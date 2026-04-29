@@ -53,7 +53,7 @@ export type ApprovalEmailOptions = {
   kind: ApprovalEmailKind;
   contactName: string; // Recipient's name for the greeting
   workspaceName: string; // The client / brand
-  drafterName: string; // Wilson's team member who drafted
+  drafterName: string | null; // Wilson's team member who drafted
   /** For posts: the post body. For messages: the outreach copy. */
   preview: string;
   /** For messages only: the prospect being contacted */
@@ -122,9 +122,10 @@ export function buildApprovalEmail(opts: ApprovalEmailOptions): {
     ? "A new post is ready for your review"
     : `New outreach to ${opts.prospectName ?? "a prospect"}`;
 
+  const drafterLabel = opts.drafterName ?? "Your Wilson's team";
   const subhead = isPost
-    ? `Drafted by ${opts.drafterName} for ${opts.workspaceName}'s LinkedIn feed.`
-    : `Drafted by ${opts.drafterName} for ${opts.prospectName ?? "the prospect"}${
+    ? `Drafted by ${drafterLabel} for ${opts.workspaceName}'s LinkedIn feed.`
+    : `Drafted by ${drafterLabel} for ${opts.prospectName ?? "the prospect"}${
         opts.prospectCompany ? ` at ${opts.prospectCompany}` : ""
       }.`;
 
@@ -133,7 +134,7 @@ export function buildApprovalEmail(opts: ApprovalEmailOptions): {
   const text = [
     `Hi ${opts.contactName.split(" ")[0]},`,
     "",
-    `${opts.drafterName} from your Wilson's team has drafted a new ${itemLabel} for your approval.`,
+    `${drafterLabel} from your Wilson's team has drafted a new ${itemLabel} for your approval.`,
     "",
     isPost && opts.postTitle ? `Title: ${opts.postTitle}` : "",
     "",
@@ -290,4 +291,233 @@ function escape(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/* ─── Magic-link sign-in email (Auth.js Resend provider) ──────── */
+// Auth.js calls our sendVerificationRequest override which delegates here.
+// `apiKey` and `from` come straight from provider config so we can be called
+// with whatever Auth.js was configured with — independent of RESEND_API_KEY.
+
+export async function sendMagicLinkEmail(args: {
+  to: string;
+  url: string;
+  from?: string;
+  apiKey?: string;
+}): Promise<void> {
+  const apiKey = args.apiKey ?? process.env.AUTH_RESEND_KEY;
+  const from = args.from ?? process.env.AUTH_EMAIL_FROM ?? FROM_EMAIL_DEFAULT;
+  if (!apiKey) {
+    console.warn("[auth] AUTH_RESEND_KEY missing — magic link not sent");
+    return;
+  }
+  const r = new Resend(apiKey);
+  const { html, text } = renderSignInEmail(args.url);
+  await r.emails.send({
+    from,
+    to: args.to,
+    subject: "Sign in to Wilson's",
+    html,
+    text,
+  });
+}
+
+function renderSignInEmail(url: string): { html: string; text: string } {
+  const text = [
+    "Sign in to Wilson's",
+    "",
+    "Click the link below to sign in. The link expires in 24 hours.",
+    "",
+    url,
+    "",
+    "If you didn't request this, you can safely ignore the email.",
+    "",
+    "— Wilson's",
+  ].join("\n");
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sign in to Wilson&rsquo;s</title>
+</head>
+<body style="margin:0;padding:0;background:${BRAND.forest};font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.virgil};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.forest};padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
+          <tr>
+            <td align="center" style="font-family:'Instrument Serif',Georgia,'Times New Roman',serif;font-style:italic;font-size:44px;line-height:1;color:${BRAND.virgil};letter-spacing:-0.02em;">
+              Wilson&rsquo;s
+            </td>
+          </tr>
+        </table>
+
+        <table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:16px;border:1px solid rgba(255,255,255,0.06);box-shadow:0 8px 28px rgba(0,0,0,0.18);">
+          <tr>
+            <td style="padding:14px 28px;border-bottom:1px solid ${BRAND.border};background:${BRAND.virgil};border-radius:16px 16px 0 0;">
+              <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:${BRAND.charcoal300};">
+                Sign in
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 28px 8px 28px;background:#ffffff;">
+              <h1 style="margin:0 0 8px 0;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:26px;font-weight:600;line-height:1.2;color:${BRAND.forest};letter-spacing:-0.02em;">
+                Your sign-in link
+              </h1>
+              <p style="margin:0 0 20px 0;font-size:14px;line-height:1.55;color:${BRAND.charcoal500};">
+                Click the button below to sign in to the Wilson&rsquo;s portal. The link expires in 24 hours.
+              </p>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 8px 0;">
+                <tr>
+                  <td align="center" style="border-radius:10px;background:${BRAND.lime};">
+                    <a href="${escape(url)}" style="display:inline-block;padding:14px 22px;font-size:14px;font-weight:600;color:${BRAND.forestDark};text-decoration:none;border-radius:10px;">
+                      Sign in to Wilson&rsquo;s →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:14px 0 0 0;font-size:12px;color:${BRAND.charcoal300};word-break:break-all;">
+                Or copy and paste this URL into your browser:<br />
+                <span style="color:${BRAND.charcoal500};">${escape(url)}</span>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 28px 22px 28px;border-top:1px solid ${BRAND.border};background:#ffffff;border-radius:0 0 16px 16px;font-size:11px;line-height:1.55;color:${BRAND.charcoal300};">
+              If you didn&rsquo;t request this, you can safely ignore the email.
+            </td>
+          </tr>
+        </table>
+
+        <p style="margin:20px 0 0 0;font-size:11px;color:rgba(249,245,238,0.55);letter-spacing:0.04em;">
+          Real people deserve real stories.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return { html, text };
+}
+
+/* ─── Invite email ────────────────────────────────────────────── */
+
+export type InviteEmailOpts = {
+  to: string;
+  inviteUrl: string;
+  systemRole: "ADMIN" | "TEAM_MEMBER" | "CLIENT";
+  workspaceName?: string | null;
+  inviterName?: string | null;
+};
+
+export async function sendInviteEmail(opts: InviteEmailOpts): Promise<void> {
+  const apiKey = process.env.AUTH_RESEND_KEY ?? process.env.RESEND_API_KEY;
+  const from = process.env.AUTH_EMAIL_FROM ?? FROM_EMAIL_DEFAULT;
+  if (!apiKey) {
+    console.warn("[invite] no Resend key — invite email skipped");
+    return;
+  }
+  const r = new Resend(apiKey);
+  const { subject, html, text } = renderInviteEmail(opts);
+  await r.emails.send({ from, to: opts.to, subject, html, text });
+}
+
+function renderInviteEmail(opts: InviteEmailOpts): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const inviterPart = opts.inviterName ? ` by ${opts.inviterName}` : "";
+  const audience =
+    opts.systemRole === "CLIENT" && opts.workspaceName
+      ? `the ${opts.workspaceName} workspace`
+      : opts.systemRole === "ADMIN"
+        ? "Wilson's as an admin"
+        : "the Wilson's team";
+
+  const subject = `You've been invited to Wilson's`;
+
+  const text = [
+    `You've been invited${inviterPart} to ${audience}.`,
+    "",
+    "Click the link below to accept and sign in:",
+    opts.inviteUrl,
+    "",
+    "This invite expires in 7 days. If you weren't expecting it, ignore the email.",
+    "",
+    "— Wilson's",
+  ].join("\n");
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>${escape(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:${BRAND.forest};font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.virgil};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.forest};padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
+          <tr>
+            <td align="center" style="font-family:'Instrument Serif',Georgia,'Times New Roman',serif;font-style:italic;font-size:44px;line-height:1;color:${BRAND.virgil};letter-spacing:-0.02em;">
+              Wilson&rsquo;s
+            </td>
+          </tr>
+        </table>
+
+        <table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:16px;border:1px solid rgba(255,255,255,0.06);box-shadow:0 8px 28px rgba(0,0,0,0.18);">
+          <tr>
+            <td style="padding:14px 28px;border-bottom:1px solid ${BRAND.border};background:${BRAND.virgil};border-radius:16px 16px 0 0;">
+              <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:${BRAND.charcoal300};">
+                You&rsquo;re invited
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 28px 8px 28px;background:#ffffff;">
+              <h1 style="margin:0 0 8px 0;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:26px;font-weight:600;line-height:1.2;color:${BRAND.forest};letter-spacing:-0.02em;">
+                Welcome to Wilson&rsquo;s
+              </h1>
+              <p style="margin:0 0 20px 0;font-size:14px;line-height:1.55;color:${BRAND.charcoal500};">
+                You&rsquo;ve been invited${escape(inviterPart)} to ${escape(audience)}.
+                Click below to accept and sign in.
+              </p>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 8px 0;">
+                <tr>
+                  <td align="center" style="border-radius:10px;background:${BRAND.lime};">
+                    <a href="${escape(opts.inviteUrl)}" style="display:inline-block;padding:14px 22px;font-size:14px;font-weight:600;color:${BRAND.forestDark};text-decoration:none;border-radius:10px;">
+                      Accept invitation →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:14px 0 0 0;font-size:12px;color:${BRAND.charcoal300};">
+                This invite expires in 7 days.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 28px 22px 28px;border-top:1px solid ${BRAND.border};background:#ffffff;border-radius:0 0 16px 16px;font-size:11px;line-height:1.55;color:${BRAND.charcoal300};">
+              If you weren&rsquo;t expecting this, you can safely ignore the email.
+            </td>
+          </tr>
+        </table>
+
+        <p style="margin:20px 0 0 0;font-size:11px;color:rgba(249,245,238,0.55);letter-spacing:0.04em;">
+          Real people deserve real stories.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, html, text };
 }

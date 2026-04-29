@@ -171,7 +171,7 @@ export default async function ApproveByTokenPage({
 type PostWithRelations = Awaited<
   ReturnType<typeof prisma.post.findMany>
 >[number] & {
-  drafter: { name: string };
+  drafter: { name: string | null };
   media: { id: string; url: string; filename: string | null }[];
 };
 
@@ -302,7 +302,7 @@ type MessageWithRelations = Awaited<
   ReturnType<typeof prisma.message.findMany>
 >[number] & {
   prospect: { fullName: string; title: string | null; company: string };
-  drafter: { name: string };
+  drafter: { name: string | null };
 };
 
 function MessageApprovalCard({

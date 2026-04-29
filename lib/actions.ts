@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "./db";
 import { requireUser, requireWorkspace } from "./auth";
 import { sendApprovalEmail, type ApprovalEmailOptions } from "./email";
+import { enforceTokenRateLimit } from "./rate-limit";
 
 /**
  * All server actions for the Wilson's portal. Each one:
@@ -677,6 +678,7 @@ export async function submitOnboardingByToken(formData: FormData) {
     responseId: formData.get("responseId"),
     answer: formData.get("answer") || undefined,
   });
+  await enforceTokenRateLimit(parsed.token);
 
   const workspace = await prisma.workspace.findUnique({
     where: { onboardingToken: parsed.token },
@@ -2081,6 +2083,7 @@ export async function approvePostByToken(formData: FormData) {
     token: formData.get("token"),
     postId: formData.get("postId"),
   });
+  await enforceTokenRateLimit(token);
   const workspace = await loadWorkspaceByToken(token);
   const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post || post.workspaceId !== workspace.id) {
@@ -2126,6 +2129,7 @@ export async function editAndApprovePostByToken(formData: FormData) {
     postId: formData.get("postId"),
     body: formData.get("body"),
   });
+  await enforceTokenRateLimit(token);
   const workspace = await loadWorkspaceByToken(token);
   const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post || post.workspaceId !== workspace.id) {
@@ -2173,6 +2177,7 @@ export async function rejectPostByToken(formData: FormData) {
     postId: formData.get("postId"),
     note: formData.get("note"),
   });
+  await enforceTokenRateLimit(token);
   const workspace = await loadWorkspaceByToken(token);
   const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post || post.workspaceId !== workspace.id) {
@@ -2215,6 +2220,7 @@ export async function approveMessageByToken(formData: FormData) {
     token: formData.get("token"),
     messageId: formData.get("messageId"),
   });
+  await enforceTokenRateLimit(token);
   const workspace = await loadWorkspaceByToken(token);
   const message = await prisma.message.findUnique({
     where: { id: messageId },
@@ -2267,6 +2273,7 @@ export async function editAndApproveMessageByToken(formData: FormData) {
     messageId: formData.get("messageId"),
     body: formData.get("body"),
   });
+  await enforceTokenRateLimit(token);
   const workspace = await loadWorkspaceByToken(token);
   const message = await prisma.message.findUnique({
     where: { id: messageId },
@@ -2321,6 +2328,7 @@ export async function rejectMessageByToken(formData: FormData) {
     messageId: formData.get("messageId"),
     note: formData.get("note"),
   });
+  await enforceTokenRateLimit(token);
   const workspace = await loadWorkspaceByToken(token);
   const message = await prisma.message.findUnique({
     where: { id: messageId },

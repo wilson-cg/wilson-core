@@ -1,74 +1,197 @@
-import { cookies } from "next/headers";
+import NextAuth, { type DefaultSession } from "next-auth";
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import Resend from "next-auth/providers/resend";
 import { redirect } from "next/navigation";
 import { prisma } from "./db";
-import type { SystemRole } from "@prisma/client";
+import { sendMagicLinkEmail } from "./email";
+import type { Membership, SystemRole, Workspace } from "@prisma/client";
 
 /**
- * Stress-test auth — single signed-ish cookie holding a userId. Good enough
- * for clicking through all the flows end-to-end before we commit to Clerk or
- * NextAuth for production.
+ * Auth.js v5 magic-link auth.
  *
- * Swap the guts for Clerk/NextAuth when the product ships — the server
- * helpers here (currentUser, requireUser, requireRole, requireWorkspace)
- * are what the pages import, and those signatures stay stable.
+ * - Email-only (Resend provider) — no passwords.
+ * - Database sessions (Prisma adapter) so `auth()` returns the live user
+ *   row including roles + memberships.
+ * - signIn callback gates new sign-ins: unknown emails are rejected unless
+ *   a pending Invite row exists for them. This is the only way someone
+ *   without an existing User row can sign in.
+ * - events.createUser fires once per brand-new account; if a matching
+ *   Invite exists we promote them to the right SystemRole and create a
+ *   workspace Membership when the invite was workspace-scoped.
+ *
+ * Stable shims (currentUser / requireUser / requireRole / requireWorkspace)
+ * preserve the surface the rest of the app already imports.
  */
 
-const COOKIE_NAME = "wilsons_session";
+type MembershipWithWorkspace = Membership & { workspace: Workspace };
 
-export async function setSession(userId: string) {
-  const jar = await cookies();
-  jar.set(COOKIE_NAME, userId, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30, // 30 days
-  });
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string;
+      email: string;
+      name: string | null;
+      role: SystemRole;
+      memberships: MembershipWithWorkspace[];
+    } & DefaultSession["user"];
+  }
 }
 
-export async function clearSession() {
-  const jar = await cookies();
-  jar.delete(COOKIE_NAME);
-}
-
-export async function currentUser() {
-  const jar = await cookies();
-  const userId = jar.get(COOKIE_NAME)?.value;
-  if (!userId) return null;
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      memberships: {
-        include: { workspace: true },
+export const { auth, handlers, signIn, signOut } = NextAuth({
+  adapter: PrismaAdapter(prisma),
+  session: { strategy: "database" },
+  trustHost: true,
+  providers: [
+    Resend({
+      apiKey: process.env.AUTH_RESEND_KEY,
+      from: process.env.AUTH_EMAIL_FROM,
+      // Branded magic-link email (matches the approval email style).
+      async sendVerificationRequest({ identifier, url, provider }) {
+        await sendMagicLinkEmail({
+          to: identifier,
+          url,
+          from: provider.from,
+          apiKey: provider.apiKey,
+        });
       },
+    }),
+  ],
+  pages: {
+    signIn: "/login",
+    verifyRequest: "/login/check-email",
+    error: "/login",
+  },
+  callbacks: {
+    async signIn({ user }) {
+      const email = user?.email?.toLowerCase();
+      if (!email) return false;
+
+      // Existing user → always allowed.
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) return true;
+
+      // Brand-new email → require a live invite.
+      const invite = await prisma.invite.findFirst({
+        where: {
+          email,
+          acceptedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+      });
+      return !!invite;
     },
-  });
-  return user;
+    async session({ session, user }) {
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        include: { memberships: { include: { workspace: true } } },
+      });
+      if (!dbUser) return session;
+
+      session.user.id = dbUser.id;
+      session.user.email = dbUser.email;
+      // Display fallbacks: a) user-set name, b) email local-part. The rest
+      // of the app calls .split(" ")[0] on this, so it must be non-empty.
+      session.user.name = dbUser.name ?? dbUser.email.split("@")[0] ?? "there";
+      session.user.role = dbUser.role;
+      session.user.memberships = dbUser.memberships;
+      return session;
+    },
+  },
+  events: {
+    async createUser({ user }) {
+      // First sign-in only. Auth.js calls createUser once when a brand-new
+      // User row is provisioned by the adapter.
+      const email = user.email?.toLowerCase();
+      if (!email || !user.id) return;
+
+      const invite = await prisma.invite.findFirst({
+        where: {
+          email,
+          acceptedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!invite) return;
+
+      const userId = user.id;
+      const fallbackName =
+        user.name && user.name.trim().length > 0
+          ? user.name
+          : email.split("@")[0] ?? "Member";
+
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            role: invite.systemRole,
+            name: fallbackName,
+          },
+        });
+        if (invite.workspaceId && invite.workspaceRole) {
+          await tx.membership.upsert({
+            where: {
+              userId_workspaceId: {
+                userId,
+                workspaceId: invite.workspaceId,
+              },
+            },
+            update: { role: invite.workspaceRole },
+            create: {
+              userId,
+              workspaceId: invite.workspaceId,
+              role: invite.workspaceRole,
+            },
+          });
+        }
+        await tx.invite.update({
+          where: { id: invite.id },
+          data: { acceptedAt: new Date() },
+        });
+      });
+    },
+  },
+});
+
+/* ─── Stable shims used everywhere else in the app ──────────── */
+
+export type AuthedUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: SystemRole;
+  memberships: MembershipWithWorkspace[];
+};
+
+export async function currentUser(): Promise<AuthedUser | null> {
+  const session = await auth();
+  const u = session?.user;
+  if (!u?.id) return null;
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name ?? u.email.split("@")[0] ?? "there",
+    role: u.role,
+    memberships: u.memberships ?? [],
+  };
 }
 
-export type AuthedUser = NonNullable<Awaited<ReturnType<typeof currentUser>>>;
-
-/** Require a signed-in user or redirect to login. */
 export async function requireUser(): Promise<AuthedUser> {
   const user = await currentUser();
   if (!user) redirect("/login");
   return user;
 }
 
-/** Require a specific system role or block with a redirect. */
-export async function requireRole(...roles: SystemRole[]): Promise<AuthedUser> {
+export async function requireRole(
+  ...roles: SystemRole[]
+): Promise<AuthedUser> {
   const user = await requireUser();
   if (!roles.includes(user.role)) {
-    // Send clients back to their own workspace; send staff back home
     redirect(user.role === "CLIENT" ? "/client/dashboard" : "/dashboard");
   }
   return user;
 }
 
-/**
- * Require the current user has access to the given workspace slug and
- * return both the user and the workspace. Core scoping guard — every
- * workspace-scoped page should call this.
- */
 export async function requireWorkspace(slug: string) {
   const user = await requireUser();
   const workspace = await prisma.workspace.findUnique({
@@ -84,7 +207,7 @@ export async function requireWorkspace(slug: string) {
     (m) => m.workspaceId === workspace.id
   );
 
-  // Admins get implicit access to every workspace even without a membership row
+  // Admins get implicit access to every workspace even without a membership row.
   if (!membership && user.role !== "ADMIN") {
     redirect(user.role === "CLIENT" ? "/client/dashboard" : "/dashboard");
   }
@@ -92,12 +215,11 @@ export async function requireWorkspace(slug: string) {
   return { user, workspace, membership };
 }
 
-/** List all users — used by the stress-test login switcher. */
-export async function listTestUsers() {
-  return prisma.user.findMany({
-    orderBy: [{ role: "asc" }, { name: "asc" }],
-    include: {
-      memberships: { include: { workspace: true } },
-    },
-  });
+/**
+ * Compatibility shim — older code imported `clearSession` from here. We keep
+ * the export so we don't break call sites; new code should call signOut()
+ * from this module directly.
+ */
+export async function clearSession() {
+  await signOut({ redirectTo: "/login" });
 }

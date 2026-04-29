@@ -602,6 +602,134 @@ Based on the flow of the session, plausible next-up features:
 
 ---
 
+## Production readiness layer (added 2026-04-29)
+
+Three production hardening landed together on `feat/prod-readiness`:
+
+### Auth — Auth.js v5 + magic links + invites
+
+The cookie-based stress-test login (`wilsons_session` userId cookie) was replaced
+with Auth.js v5 + Resend magic links + a new `Invite` table.
+
+**Sign-in flow:**
+1. User goes to `/login` → enters email → server action calls
+   `signIn("resend", { email, redirectTo: "/dashboard" })`
+2. Auth.js generates a `VerificationToken`, Resend delivers a branded magic link
+3. User clicks the link → Auth.js verifies the token → `signIn` callback runs:
+   - allows existing User rows through
+   - rejects new emails unless a pending `Invite` row matches
+4. On first sign-in for a fresh User, the `events.createUser` hook accepts the
+   pending invite, sets `User.role` from the invite's `systemRole`, creates a
+   `Membership` if the invite was workspace-scoped, and marks the invite accepted
+
+**Invite flow:**
+- ADMIN visits `/dashboard/team` → "Invite teammate" form → `createInvite`
+  generates a 32-byte hex token, 7-day expiry, sends a branded email
+- For workspace-scoped invites (CLIENT or workspace member), use the Members
+  section in workspace settings — calls `inviteToWorkspace` (ADMIN/TEAM_MEMBER gated)
+- Invite landing page is `/invite/[token]` — public, no auth required
+- Revoke / resend actions live on the team page
+
+**Stable shims:** `lib/auth.ts` still exports `currentUser()`, `requireUser()`,
+`requireRole(...)`, `requireWorkspace(slug)` with the same shapes the rest of
+the app expects. `listTestUsers` was removed.
+
+**Bootstrap the first ADMIN** (no UI exists to create the very first invite —
+only an existing ADMIN can):
+```bash
+DATABASE_URL=... AUTH_RESEND_KEY=... AUTH_EMAIL_FROM=... \
+  npm run db:bootstrap-admin -- you@example.com
+```
+Prints the invite URL. Sends an email if Resend creds are set.
+
+**Required env vars** (see `.env.example`):
+- `AUTH_SECRET` — `openssl rand -base64 32`
+- `AUTH_URL` — public URL (Railway sets this; `http://localhost:3000` for dev)
+- `AUTH_RESEND_KEY` — Resend API key (can be the same one as `RESEND_API_KEY`)
+- `AUTH_EMAIL_FROM` — `Wilson's <noreply@verified-domain>`
+
+### Rate limiting — Upstash sliding window
+
+Every public-token-scoped server action is rate-limited at **10 req / 60s per token**
+via `@upstash/ratelimit`. The token itself is the key.
+
+Wrapped actions (`lib/actions.ts`):
+- `submitOnboardingByToken` (`onboardingToken`)
+- `approvePostByToken` / `editAndApprovePostByToken` / `rejectPostByToken`
+- `approveMessageByToken` / `editAndApproveMessageByToken` / `rejectMessageByToken`
+
+If `UPSTASH_REDIS_REST_URL` is unset, `enforceTokenRateLimit` no-ops so local
+dev doesn't need an Upstash account. For prod, set:
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
+The helper lives in `lib/rate-limit.ts`.
+
+### Real Prisma migrations
+
+See "Migration adoption strategy" below. Short version: `prisma db push` is
+gone; Railway now runs `prisma migrate deploy` at start.
+
+---
+
+### Migration adoption strategy
+
+The project switched from `prisma db push --accept-data-loss` (run on every Railway boot)
+to real Prisma migrations on 2026-04-29. Two migration folders ship in `prisma/migrations/`:
+
+- `0_init/` — full snapshot of the pre-auth schema. This matches what Railway prod
+  already had on disk from previous `db push` runs. NO new SQL is run for it on prod.
+- `1_auth_and_invites/` — the delta added by Auth.js v5 + the `Invite` model:
+  adds `Account`, `Session`, `VerificationToken`, `Invite` tables, plus three new
+  columns on `User` (`emailVerified`, `image`, and dropping NOT NULL on `name`).
+
+**For local dev / fresh Postgres**:
+```bash
+npx prisma migrate deploy   # applies both migrations cleanly
+npx prisma generate
+```
+
+**For Railway prod (which already had the pre-auth schema applied via `db push`)**:
+the adoption was a one-time, manual two-step:
+
+1. Take a Railway DB backup (Railway dashboard → Postgres → Backups → "Take backup now").
+2. From a local shell with Railway's public DATABASE_URL, mark `0_init` as already
+   applied (no SQL run — just inserts a row into `_prisma_migrations`):
+   ```bash
+   DATABASE_URL=<railway_public_url> npx prisma migrate resolve --applied 0_init
+   ```
+3. Then run `migrate deploy`. It sees `0_init` is satisfied and applies only
+   `1_auth_and_invites`:
+   ```bash
+   DATABASE_URL=<railway_public_url> npx prisma migrate deploy
+   ```
+
+**What was actually run on 2026-04-29 against Railway:**
+```
+$ npx prisma migrate resolve --applied 0_init
+Migration 0_init marked as applied.
+
+$ npx prisma migrate deploy
+2 migrations found in prisma/migrations
+Applying migration `1_auth_and_invites`
+The following migration(s) have been applied:
+migrations/
+  └─ 1_auth_and_invites/
+    └─ migration.sql
+All migrations have been successfully applied.
+```
+
+After that, `npm start` on Railway runs `prisma migrate deploy && next start`,
+which is now a no-op until a new migration lands. New migrations should be created
+locally with `npx prisma migrate dev --name <description>` and committed to git;
+the next Railway boot will apply them.
+
+**Do NOT run `prisma migrate dev` against Railway prod** — it can rewrite history.
+Use `migrate dev` only against a local/scratch DB; commit the generated SQL; let
+prod pick it up via `migrate deploy`.
+
+---
+
 ## Final notes for an agent picking this up
 
 - **Read `lib/actions.ts` first.** It's the heart of the app. ~1000 lines
