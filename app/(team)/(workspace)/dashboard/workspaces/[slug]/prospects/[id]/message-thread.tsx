@@ -52,7 +52,7 @@ export type ThreadMessage = {
   sentAt: string | null;
   repliedAt: string | null;
   approverName: string | null;
-  drafterName: string;
+  drafterName: string | null;
   createdAt: string;
 };
 

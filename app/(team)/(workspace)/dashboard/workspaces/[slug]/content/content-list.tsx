@@ -143,7 +143,7 @@ function ListSection({
                   </div>
                 </div>
                 <span className="text-xs text-[var(--color-charcoal-500)]">
-                  {p.drafterName.split(" ")[0]}
+                  {(p.drafterName ?? "—").split(" ")[0]}
                 </span>
                 <span className="inline-flex items-center gap-1 text-xs text-[var(--color-muted-foreground)]">
                   {p.mediaCount > 0 ? (

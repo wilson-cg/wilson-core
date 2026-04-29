@@ -75,7 +75,7 @@ export type KanbanPost = {
   title: string | null;
   body: string;
   status: string;
-  drafterName: string;
+  drafterName: string | null;
   updatedAt: string;
   mediaCount: number;
   firstMediaUrl: string | null;
@@ -426,7 +426,7 @@ function CardBody({
       ) : null}
       <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--color-muted-foreground)]">
         <span className="inline-flex items-center gap-1.5">
-          {post.drafterName.split(" ")[0]}
+          {(post.drafterName ?? "—").split(" ")[0]}
           {post.mediaCount > 0 ? (
             <span className="inline-flex items-center gap-0.5">
               <Paperclip className="h-2.5 w-2.5" />

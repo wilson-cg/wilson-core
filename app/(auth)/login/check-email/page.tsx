@@ -1,35 +1,39 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/brand/wordmark";
-import { LoginForm } from "./login-form";
+import { Mail } from "lucide-react";
 
-/**
- * Magic-link sign-in. Single email input → Auth.js + Resend send a
- * branded sign-in link. New emails are gated by the signIn callback in
- * lib/auth.ts (must have a pending Invite).
- */
-export default function LoginPage() {
+export default function CheckEmailPage() {
   return (
     <main className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
-      {/* ── Left: sign-in form ── */}
+      {/* ── Left: confirmation ── */}
       <div className="flex items-center justify-center px-8 py-16 lg:px-16">
         <div className="w-full max-w-sm">
           <Link href="/" className="inline-flex items-center">
             <Wordmark tone="forest" className="h-10" />
           </Link>
 
-          <h1 className="app-heading mt-12 text-3xl text-[var(--color-forest)]">
-            Welcome back
+          <div className="mt-12 inline-flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-forest)]/10 text-[var(--color-forest)]">
+            <Mail className="h-5 w-5" />
+          </div>
+
+          <h1 className="app-heading mt-6 text-3xl text-[var(--color-forest)]">
+            Check your email
           </h1>
           <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
-            Enter your email and we&rsquo;ll send you a sign-in link.
+            We&rsquo;ve sent a sign-in link to your email. Click the button in
+            the email to finish signing in. The link expires in 24 hours.
           </p>
 
-          <LoginForm />
-
-          <p className="mt-8 text-xs text-[var(--color-muted-foreground)]">
-            Trouble signing in? Ask your Wilson&rsquo;s contact to send you a
-            new invite.
-          </p>
+          <div className="mt-8 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-virgil-dark)]/40 px-4 py-3 text-xs text-[var(--color-charcoal-300)]">
+            Didn&rsquo;t get the email? Check your spam folder, or{" "}
+            <Link
+              href="/login"
+              className="font-medium text-[var(--color-forest)] underline-offset-2 hover:underline"
+            >
+              try again
+            </Link>
+            .
+          </div>
         </div>
       </div>
 
