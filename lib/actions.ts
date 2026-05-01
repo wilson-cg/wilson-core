@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { prisma } from "./db";
 import { requireUser, requireWorkspace } from "./auth";
+import { requirePermission, type WorkspaceAction } from "./permissions";
 import { sendApprovalEmail, type ApprovalEmailOptions } from "./email";
 import { enforceTokenRateLimit } from "./rate-limit";
 import { fetchLinkedInProfile, type LinkedInProfile } from "./coresignal";
@@ -64,7 +65,7 @@ export async function addProspect(formData: FormData) {
   });
 
   const { user, workspace } = await requireWorkspace(parsed.workspaceSlug);
-  if (user.role === "CLIENT") redirect("/client/dashboard");
+  requirePermission(user, workspace.id, "edit");
 
   const created = await prisma.$transaction(async (tx) => {
     const prospect = await tx.prospect.create({
@@ -116,8 +117,15 @@ export async function autofillProspectFromLinkedIn(
   linkedinUrl: string
 ): Promise<AutofillResult> {
   const user = await requireUser();
-  if (user.role === "CLIENT")
-    return { ok: false, error: "Clients cannot run auto-fill." };
+  // Auto-fill is part of the capture flow — gate by the user having `edit`
+  // permission in at least one workspace. Per-workspace check happens at
+  // capture time inside addProspect.
+  const hasEditAnywhere =
+    user.role === "ADMIN" ||
+    user.memberships.some((m) => m.canEdit);
+  if (!hasEditAnywhere) {
+    return { ok: false, error: "You don't have permission to capture prospects." };
+  }
 
   const parsed = autofillSchema.safeParse({ linkedinUrl });
   if (!parsed.success) {
@@ -140,6 +148,41 @@ function humanSignal(s: string) {
     .toLowerCase()
     .replace(/_/g, " ")
     .replace(/^./, (c) => c.toUpperCase());
+}
+
+/* ─── Permission helpers (V1 UX overhaul) ────────────────────
+ *
+ * Many actions need: load the prospect/message/post, find its workspaceId,
+ * then enforce the right permission flag. These helpers wrap that pattern
+ * so callers stay terse. They throw with a clear message that surfaces in
+ * the optimistic-update toast on the client.
+ */
+async function requireProspectPermission(
+  prospectId: string,
+  action: WorkspaceAction
+) {
+  const user = await requireUser();
+  const prospect = await prisma.prospect.findUnique({
+    where: { id: prospectId },
+    include: { workspace: { select: { id: true, slug: true } } },
+  });
+  if (!prospect) throw new Error("Prospect not found");
+  requirePermission(user, prospect.workspaceId, action);
+  return { user, prospect };
+}
+
+async function requireMessagePermission(
+  messageId: string,
+  action: WorkspaceAction
+) {
+  const user = await requireUser();
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { id: true, workspaceId: true },
+  });
+  if (!message) throw new Error("Message not found");
+  requirePermission(user, message.workspaceId, action);
+  return { user, message };
 }
 
 /* ─── Prospect status forward-only helper ────────────────────
@@ -240,14 +283,10 @@ export async function draftMessage(formData: FormData) {
     body: formData.get("body"),
   });
 
-  const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot draft messages");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: parsed.prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  const { user, prospect } = await requireProspectPermission(
+    parsed.prospectId,
+    "edit"
+  );
 
   await prisma.$transaction(async (tx) => {
     const message = await tx.message.create({
@@ -299,6 +338,7 @@ export async function updateDraft(formData: FormData) {
   if (!message || message.status !== "DRAFT") {
     throw new Error("Message not editable");
   }
+  requirePermission(user, message.workspaceId, "edit");
 
   await prisma.message.update({
     where: { id: messageId },
@@ -328,6 +368,7 @@ export async function submitForApproval(formData: FormData) {
   if (!message || !["DRAFT", "REJECTED"].includes(message.status)) {
     throw new Error("Message cannot be submitted");
   }
+  requirePermission(user, message.workspaceId, "edit");
 
   const recipientEmail = pickApprovalRecipient(message.workspace);
 
@@ -405,6 +446,7 @@ export async function approveMessage(formData: FormData) {
   if (!message || message.status !== "PENDING_APPROVAL") {
     throw new Error("Message not pending approval");
   }
+  requirePermission(user, message.workspaceId, "approve");
 
   await prisma.$transaction(async (tx) => {
     await tx.message.update({
@@ -456,6 +498,7 @@ export async function editAndApprove(formData: FormData) {
   if (!message || message.status !== "PENDING_APPROVAL") {
     throw new Error("Message not pending approval");
   }
+  requirePermission(user, message.workspaceId, "approve");
 
   await prisma.$transaction(async (tx) => {
     await tx.message.update({
@@ -509,6 +552,7 @@ export async function rejectMessage(formData: FormData) {
   if (!message || message.status !== "PENDING_APPROVAL") {
     throw new Error("Message not pending approval");
   }
+  requirePermission(user, message.workspaceId, "approve");
 
   await prisma.$transaction(async (tx) => {
     await tx.message.update({
@@ -549,7 +593,6 @@ export async function rejectMessage(formData: FormData) {
 export async function markAsSent(formData: FormData) {
   const messageId = z.string().min(1).parse(formData.get("messageId"));
   const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot mark sent");
 
   const message = await prisma.message.findUnique({
     where: { id: messageId },
@@ -561,6 +604,7 @@ export async function markAsSent(formData: FormData) {
   if (!message || message.status !== "APPROVED") {
     throw new Error("Message not approved");
   }
+  requirePermission(user, message.workspaceId, "send");
 
   await prisma.$transaction(async (tx) => {
     await tx.message.update({
@@ -599,7 +643,6 @@ export async function markAsSent(formData: FormData) {
 export async function markAsReplied(formData: FormData) {
   const messageId = z.string().min(1).parse(formData.get("messageId"));
   const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot mark replied");
 
   const message = await prisma.message.findUnique({
     where: { id: messageId },
@@ -611,6 +654,7 @@ export async function markAsReplied(formData: FormData) {
   if (!message || message.status !== "SENT") {
     throw new Error("Message not sent");
   }
+  requirePermission(user, message.workspaceId, "send");
 
   await prisma.$transaction(async (tx) => {
     await tx.message.update({
@@ -640,14 +684,7 @@ export async function markAsReplied(formData: FormData) {
 
 export async function markMeetingBooked(formData: FormData) {
   const prospectId = z.string().min(1).parse(formData.get("prospectId"));
-  const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot update status");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  const { prospect } = await requireProspectPermission(prospectId, "send");
 
   await prisma.prospect.update({
     where: { id: prospectId },
@@ -831,12 +868,13 @@ const updateWorkspaceProfileSchema = z.object({
 });
 
 /**
- * Available to admins, team members assigned to the workspace, and the
- * workspace's client users. Each gets their own settings page surface.
+ * Workspace-write actions (profile, contacts, onboarding, members).
+ * Tightened in V1 UX overhaul: the caller now needs `admin` permission in
+ * the target workspace. System ADMINs bypass via permissions.ts.
  */
 async function requireWorkspaceWriteAccess(slug: string) {
   const ctx = await requireWorkspace(slug);
-  // requireWorkspace already enforces membership/admin
+  requirePermission(ctx.user, ctx.workspace.id, "admin");
   return ctx;
 }
 
@@ -1322,14 +1360,25 @@ export async function moveProspectToStage(formData: FormData) {
     prospectId: formData.get("prospectId"),
     stage: formData.get("stage"),
   });
-  const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot move prospects");
 
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  // Gate the move by which kind of permission the target stage requires.
+  // Per the V1 meeting:
+  //   approve → NEEDS_APPROVER_DECISION, NOT_INTERESTED, NURTURE
+  //   edit    → IDENTIFIED, DRAFTING (writing the message itself)
+  //   send    → SENT, REPLIED, MEETING_BOOKED
+  const requiredAction: WorkspaceAction =
+    stage === "NEEDS_APPROVER_DECISION" ||
+    stage === "NOT_INTERESTED" ||
+    stage === "NURTURE"
+      ? "approve"
+      : stage === "SENT" || stage === "REPLIED" || stage === "MEETING_BOOKED"
+        ? "send"
+        : "edit";
+
+  const { user, prospect } = await requireProspectPermission(
+    prospectId,
+    requiredAction
+  );
 
   const newStatus = STAGE_CANONICAL[stage];
   if (prospect.status === newStatus) return;
@@ -1376,14 +1425,8 @@ export async function updateProspectContactDates(formData: FormData) {
     linkedinConnectedAt: formData.get("linkedinConnectedAt") || undefined,
     lastContactedAt: formData.get("lastContactedAt") || undefined,
   });
-  const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot edit CRM data");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: parsed.prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  // Contact-date editing is part of the outcome / send pipeline.
+  const { prospect } = await requireProspectPermission(parsed.prospectId, "send");
 
   await prisma.prospect.update({
     where: { id: parsed.prospectId },
@@ -1433,14 +1476,15 @@ export async function updateProspectInfo(formData: FormData) {
     approverNotes: formData.get("approverNotes") || undefined,
     notes: formData.get("notes") || undefined,
   });
-  const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot edit CRM data");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: parsed.prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  // Note: messageAngle + approverNotes are normally written through the
+  // approve flow (DECISION section). Here they ride along with the bulk
+  // edit form, so we still gate by `edit` — approvers without `edit`
+  // should use the dedicated decision-radio + approver-notes islands.
+  const { user, prospect } = await requireProspectPermission(
+    parsed.prospectId,
+    "edit"
+  );
+  void user;
 
   await prisma.prospect.update({
     where: { id: parsed.prospectId },
@@ -1487,14 +1531,11 @@ export async function setIcpField(formData: FormData) {
     field: formData.get("field"),
     value: formData.get("value"),
   });
-  const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot edit ICP fit");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: parsed.prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  // The meeting frames ICP fit as the approver's call — gate by `approve`.
+  const { user, prospect } = await requireProspectPermission(
+    parsed.prospectId,
+    "approve"
+  );
 
   // Compute the new score from the existing booleans + the toggled field.
   const next = {
@@ -1556,15 +1597,10 @@ export async function setApproverDecision(formData: FormData) {
     prospectId: formData.get("prospectId"),
     decision: formData.get("decision"),
   });
-  const user = await requireUser();
-  if (user.role === "CLIENT")
-    throw new Error("Clients cannot set approver decision");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: parsed.prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  const { user, prospect } = await requireProspectPermission(
+    parsed.prospectId,
+    "approve"
+  );
 
   await prisma.$transaction(async (tx) => {
     await tx.prospect.update({
@@ -1595,14 +1631,10 @@ export async function archiveProspect(formData: FormData) {
   const { prospectId } = archiveProspectSchema.parse({
     prospectId: formData.get("prospectId"),
   });
-  const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot archive prospects");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  const { user, prospect } = await requireProspectPermission(
+    prospectId,
+    "edit"
+  );
 
   await prisma.$transaction(async (tx) => {
     await tx.prospect.update({
@@ -1629,14 +1661,10 @@ export async function unarchiveProspect(formData: FormData) {
   const { prospectId } = archiveProspectSchema.parse({
     prospectId: formData.get("prospectId"),
   });
-  const user = await requireUser();
-  if (user.role === "CLIENT") throw new Error("Clients cannot restore prospects");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  const { user, prospect } = await requireProspectPermission(
+    prospectId,
+    "edit"
+  );
 
   await prisma.$transaction(async (tx) => {
     await tx.prospect.update({
@@ -1681,15 +1709,11 @@ export async function logProspectActivity(formData: FormData) {
     occurredAt: formData.get("occurredAt"),
     note: formData.get("note") || undefined,
   });
-  const user = await requireUser();
-  if (user.role === "CLIENT")
-    throw new Error("Clients cannot log activity");
-
-  const prospect = await prisma.prospect.findUnique({
-    where: { id: parsed.prospectId },
-    include: { workspace: { select: { slug: true } } },
-  });
-  if (!prospect) throw new Error("Prospect not found");
+  // Logging activity is a "send"-style outcome action.
+  const { user, prospect } = await requireProspectPermission(
+    parsed.prospectId,
+    "send"
+  );
 
   await prisma.$transaction(async (tx) => {
     await tx.prospectEvent.create({
