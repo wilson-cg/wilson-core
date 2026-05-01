@@ -32,8 +32,8 @@ export default async function WorkspaceLayout({
 
   const perms = permissionsForWorkspace(user, workspace.id);
 
-  // Sidebar replacement payload — pending count, members list, and the
-  // user's other accessible workspaces for the dropdown.
+  // Sidebar replacement payload — pending count, members list, and every
+  // workspace the viewer can see (for the dropdown picker).
   const [pendingMessages, members, accessibleIds] = await Promise.all([
     prisma.message.count({
       where: { workspaceId: workspace.id, status: "PENDING_APPROVAL" },
@@ -42,10 +42,8 @@ export default async function WorkspaceLayout({
     accessibleWorkspaceIds(user),
   ]);
 
-  const otherWorkspaces = await prisma.workspace.findMany({
-    where: {
-      id: { in: accessibleIds.filter((id) => id !== workspace.id) },
-    },
+  const workspaces = await prisma.workspace.findMany({
+    where: { id: { in: accessibleIds } },
     select: {
       id: true,
       slug: true,
@@ -66,8 +64,14 @@ export default async function WorkspaceLayout({
           logoUrl: workspace.logoUrl,
           accentColor: workspace.accentColor,
         }}
-        otherWorkspaces={otherWorkspaces}
+        workspaces={workspaces}
         members={members}
+        viewer={{
+          name: user.name,
+          email: user.email,
+          image: null,
+          role: user.role,
+        }}
         viewerCanAdmin={perms.canAdmin}
         pendingCount={pendingMessages}
       />
