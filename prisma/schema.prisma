@@ -111,6 +111,10 @@ model Invite {
   canEdit       Boolean        @default(false)
   canSend       Boolean        @default(false)
   canAdmin      Boolean        @default(false)
+  // Notification preferences carried through to Membership at acceptance time.
+  notifyOnNewProspect      Boolean @default(false)
+  notifyOnStatusChange     Boolean @default(false)
+  notifyOnComment          Boolean @default(false)
   invitedById   String
   invitedBy     User           @relation("InviteSender", fields: [invitedById], references: [id])
   expiresAt     DateTime
@@ -138,6 +142,10 @@ model InviteWorkspaceAccess {
   canEdit       Boolean       @default(false)
   canSend       Boolean       @default(false)
   canAdmin      Boolean       @default(false)
+  // Notification preferences carried through to Membership at acceptance time.
+  notifyOnNewProspect      Boolean @default(false)
+  notifyOnStatusChange     Boolean @default(false)
+  notifyOnComment          Boolean @default(false)
 
   invite    Invite    @relation(fields: [inviteId], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -168,8 +176,17 @@ model Membership {
   canEdit                      Boolean       @default(false)
   canSend                      Boolean       @default(false)
   canAdmin                     Boolean       @default(false)
-  // Notifications preference (Members modal → Notifications tab).
+  // Notifications preferences (Members modal → Notifications tab).
+  // notifyOnApprovalRequested keeps its true default for backwards compat;
+  // the three new flags default to false (opt-in) and get set per the
+  // invite preset (Approver/Client = approvals only; Team = all four).
   notifyOnApprovalRequested    Boolean       @default(true)
+  notifyOnNewProspect          Boolean       @default(false)
+  notifyOnStatusChange         Boolean       @default(false)
+  notifyOnComment              Boolean       @default(false)
+  // True for the workspace's "Company Owner". Backfilled to the earliest
+  // ADMIN membership per workspace; new owners must be set explicitly.
+  isWorkspaceOwner             Boolean       @default(false)
   createdAt                    DateTime      @default(now())
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
