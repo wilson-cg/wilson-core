@@ -5,6 +5,110 @@
 
 ---
 
+## Workspace sharing (Plan #1, 2026-05-01)
+
+Plannable-style sharing affordance on top of the V1 UX overhaul. Branch
+`feat/workspace-sharing-v1` (PR #6). No new dependencies, no schema breaking
+changes — purely additive.
+
+**`+ Share` button**
+
+A forest-bg pill in the top right of the in-workspace top bar (next to the
+workspace switcher pill). Visible **only when the viewer has `canAdmin`** in
+the current workspace. Clicking opens the Members modal at the **Invite**
+tab. The "Members" button on the workspace switcher dropdown still opens the
+modal at the **Members** tab. Both entry points pass `defaultTab` into the
+shared `MembersModal` component.
+
+Lives in `components/workspace/workspace-switcher.tsx` as `<ShareButton />`.
+
+**Members modal — 4 tabs**
+
+1. **Invite** (admin-only): avatar + email autocomplete (server action
+   `searchExistingUsers`, max 8 results, excludes existing members) + name
+   + Permissions select (Approver / Contributor / Sender / Administrator /
+   Custom...) + Membership select (Team / Client). Two action buttons —
+   `Create invite link` (no email, copies URL via clipboard) and
+   `Send email invite` (Resend + URL). Custom flips to Permissions tab.
+
+2. **Members**: unified list of accepted memberships AND pending invites
+   (Invite rows with `acceptedAt IS NULL` + `expiresAt > now`). Each row
+   shows avatar, role chip (Team forest / Client bee), email, relative
+   time, derived permission label on the right. `...` menu per non-owner
+   row exposes Change permissions / Remove (memberships) or Resend / Revoke
+   (pending invites). Owner row + self row have no menu. Non-admins see
+   read-only list.
+
+3. **Permissions**: 5-column matrix (View / Approve / Edit / Send / Admin).
+   View column always locked-checked. Owner Admin column locked-checked
+   (Company Owner can't have admin removed by anyone). Last-admin guard:
+   if dropping `canAdmin` would leave the workspace with zero admins, the
+   client shows a toast and the server action throws — both paths share
+   the message "At least one administrator must remain in the workspace."
+   Non-admins see read-only matrix.
+
+4. **Notifications**: 4-column matrix — New prospect / Needs approval /
+   Status changes / Comments. Each cell flips a `notifyOn*` flag on the
+   Membership row via `updateMembershipNotifications`. Admins can edit any
+   row; non-admins can only edit their own row. The footer note flags
+   that email delivery for the three new flag types ships in Phase 2B —
+   the flags are stored but no Resend send fires from them yet.
+
+**Permission presets** (`lib/permissions.ts`)
+
+- `Approver`        → view + approve
+- `Contributor`     → view + approve + edit
+- `Sender`          → view + approve + edit + send
+- `Administrator`   → view + approve + edit + send + admin
+- `Custom`          → user picks via Permissions matrix
+
+`derivePermissionLabel(membership)` does the reverse lookup so member rows
+always show a stable role label. `defaultNotificationFlags(preset, role)`
+sets the per-meeting defaults — Approver / CLIENT systemRole gets
+approvals-only; everyone else gets all four notification flags on.
+
+**Schema (migration `6_notification_prefs_owner_flag`)**
+
+- `Membership.isWorkspaceOwner` (default false). Backfilled to the earliest
+  ADMIN-system-role membership per workspace using `DISTINCT ON`.
+- `Membership.notifyOnNewProspect` / `notifyOnStatusChange` /
+  `notifyOnComment` (default false; opt-in).
+- `Invite` and `InviteWorkspaceAccess` mirror the three new notification
+  booleans so preferences flow through invite acceptance. The `createUser`
+  event in `lib/auth.ts` copies these from Invite -> Membership at accept.
+
+Migration applied to Railway prod via `npx prisma migrate deploy` —
+"All migrations have been successfully applied" returned cleanly. The
+backfill assigned `stan@wilson-cg.com` as Company Owner of the Joe / Graham
+/ Richard workspaces (the earliest ADMIN membership per workspace from
+seed-v2).
+
+**Server actions (`lib/invites.ts`)**
+
+- `inviteToWorkspace` extended with `notifications` + `sendEmail` params.
+  Returns `{ invite, url }` so callers can read the URL whether or not the
+  email fired. Same workspace-canAdmin gating.
+- `createInviteLink(input)` convenience wrapper — `sendEmail: false`,
+  returns just the URL.
+- `removeMembership(id)` — admin-gated, last-admin guard.
+- `updateMembershipPermissions(id, partial)` — admin-gated, last-admin
+  guard fires only when `canAdmin` is being TURNED OFF on a membership
+  that currently has it.
+- `updateMembershipNotifications(id, partial)` — admin OR self.
+- `revokeInvite(id)` — admin-gated on the invite's workspace.
+- `resendInvite(id)` — admin-gated, refreshes token + expiry, re-sends.
+- `searchExistingUsers({ workspaceSlug, query })` — admin-gated, prefix
+  match on `User.email`, max 8, returns `alreadyInWorkspace` flag.
+
+**Phase 2B (later) — what doesn't ship yet**
+
+The three new notification flags (new prospect / status change / comment)
+persist correctly but no actual Resend email fires from them. Wiring the
+delivery side belongs to Plan #2 / 3 (the user is writing those in
+parallel). Modal footer documents this so users don't expect mail today.
+
+---
+
 ## V1 UX overhaul rev 2 (2026-05-01)
 
 PR #4 ("Plannable-style UX overhaul", `feat/plannable-style-ux`) shipped the
