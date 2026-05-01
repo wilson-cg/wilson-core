@@ -1,47 +1,133 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { addProspect } from "@/lib/actions";
+import { Sparkles, Loader2 } from "lucide-react";
+import {
+  addProspect,
+  autofillProspectFromLinkedIn,
+  type AutofillResult,
+} from "@/lib/actions";
 
 /**
  * New-prospect capture form. Required: full name, LinkedIn URL, signal type.
+ * "Auto-fill from LinkedIn" calls Coresignal's Base Employee API and populates
+ * name / title / company / location.
  */
 export function NewProspectForm({ slug }: { slug: string }) {
   const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [title, setTitle] = useState("");
+  const [company, setCompany] = useState("");
+  const [location, setLocation] = useState("");
+  const [autofillStatus, setAutofillStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "ok" }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+  const [pending, startTransition] = useTransition();
+
+  function handleAutofill() {
+    setAutofillStatus({ kind: "loading" });
+    startTransition(async () => {
+      const result: AutofillResult =
+        await autofillProspectFromLinkedIn(linkedinUrl);
+      if (!result.ok) {
+        setAutofillStatus({ kind: "error", message: result.error });
+        return;
+      }
+      const p = result.profile;
+      if (p.fullName) setFullName(p.fullName);
+      if (p.title) setTitle(p.title);
+      if (p.company) setCompany(p.company);
+      if (p.location) setLocation(p.location);
+      setAutofillStatus({ kind: "ok" });
+    });
+  }
+
+  const canAutofill = linkedinUrl.trim().length > 0 && !pending;
 
   return (
     <form action={addProspect} className="space-y-6">
       <input type="hidden" name="workspaceSlug" value={slug} />
 
       <Field label="LinkedIn URL" required>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            name="linkedinUrl"
+            type="url"
+            placeholder="https://linkedin.com/in/jane-doe"
+            value={linkedinUrl}
+            onChange={(e) => setLinkedinUrl(e.target.value)}
+            required
+            className="flex-1"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!canAutofill}
+            onClick={handleAutofill}
+          >
+            {pending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            {pending ? "Looking up…" : "Auto-fill from LinkedIn"}
+          </Button>
+        </div>
+        {autofillStatus.kind === "ok" ? (
+          <p className="text-[11px] text-[var(--color-forest)]">
+            Found a profile. Review the fields below before saving.
+          </p>
+        ) : null}
+        {autofillStatus.kind === "error" ? (
+          <p className="text-[11px] text-[var(--color-raspberry)]">
+            {autofillStatus.message}
+          </p>
+        ) : null}
+      </Field>
+
+      <Field label="Full name" required>
         <Input
-          name="linkedinUrl"
-          type="url"
-          placeholder="https://linkedin.com/in/jane-doe"
-          value={linkedinUrl}
-          onChange={(e) => setLinkedinUrl(e.target.value)}
+          name="fullName"
+          placeholder="Jane Doe"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
           required
         />
       </Field>
 
-      <Field label="Full name" required>
-        <Input name="fullName" placeholder="Jane Doe" required />
-      </Field>
-
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Title">
-          <Input name="title" placeholder="VP Operations" />
+          <Input
+            name="title"
+            placeholder="VP Operations"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
         </Field>
         <Field label="Company">
-          <Input name="company" placeholder="Helix Biosciences" />
+          <Input
+            name="company"
+            placeholder="Helix Biosciences"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+          />
         </Field>
       </div>
 
       <Field label="Location">
-        <Input name="location" placeholder="London, UK" />
+        <Input
+          name="location"
+          placeholder="London, UK"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+        />
       </Field>
 
       <Field label="Signal type" required>

@@ -7,6 +7,7 @@ import { prisma } from "./db";
 import { requireUser, requireWorkspace } from "./auth";
 import { sendApprovalEmail, type ApprovalEmailOptions } from "./email";
 import { enforceTokenRateLimit } from "./rate-limit";
+import { fetchLinkedInProfile, type LinkedInProfile } from "./coresignal";
 import {
   revalidateApprovals,
   revalidateClientHome,
@@ -96,6 +97,42 @@ export async function addProspect(formData: FormData) {
 
   revalidatePath(`/dashboard/workspaces/${workspace.slug}/prospects`);
   redirect(`/dashboard/workspaces/${workspace.slug}/prospects/${created.id}`);
+}
+
+/**
+ * Look up a LinkedIn profile via Coresignal and return form-fillable values
+ * to the new-prospect page client island. Rate-limited per URL so a single
+ * stuck prospect doesn't burn credits or trigger Coresignal's own limiter.
+ */
+const autofillSchema = z.object({
+  linkedinUrl: z.string().url(),
+});
+
+export type AutofillResult =
+  | { ok: true; profile: LinkedInProfile }
+  | { ok: false; error: string };
+
+export async function autofillProspectFromLinkedIn(
+  linkedinUrl: string
+): Promise<AutofillResult> {
+  const user = await requireUser();
+  if (user.role === "CLIENT")
+    return { ok: false, error: "Clients cannot run auto-fill." };
+
+  const parsed = autofillSchema.safeParse({ linkedinUrl });
+  if (!parsed.success) {
+    return { ok: false, error: "Provide a valid LinkedIn URL first." };
+  }
+
+  try {
+    await enforceTokenRateLimit(`coresignal:${parsed.data.linkedinUrl}`);
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+
+  const result = await fetchLinkedInProfile(parsed.data.linkedinUrl);
+  if ("error" in result) return { ok: false, error: result.error };
+  return { ok: true, profile: result };
 }
 
 function humanSignal(s: string) {
