@@ -1,7 +1,71 @@
 # Wilson's Client Portal — Agent Handoff
 
 > Comprehensive onboarding doc for any agent (or human) picking this project up
-> mid-flight. Last updated 29 April 2026.
+> mid-flight. Last updated 1 May 2026.
+
+---
+
+## V1 UX overhaul rev 2 (2026-05-01)
+
+PR #4 ("Plannable-style UX overhaul", `feat/plannable-style-ux`) shipped the
+workspace picker home, top-bar workspace switcher, members modal, granular
+permissions, and the 5-section CSV-aligned prospect detail. After merging,
+Railway prod returned `Application error: server-side exception` for any
+authenticated user hitting `/`. The merge was reverted on `main` (commit
+`35b8abe`), but the granular-permissions migration (`5_granular_permissions`)
+was already applied to the prod DB and stayed in place.
+
+**Root cause of the picker crash**
+
+```
+Error: Event handlers cannot be passed to Client Component props.
+<button type="button" aria-label=... disabled=... onClick={function onClick} ...>
+```
+
+`app/page.tsx` rendered a disabled "favourites star" button with an inline
+`onClick={(e) => e.preventDefault()}` handler in a Server Component context.
+Functions can't cross the RSC boundary, so every render threw and Next.js
+served a 500. There was no `app/error.tsx`, so the error bubbled to the
+default 500 page (which Railway shows as "Application error: server-side
+exception"). Fixed by replacing with a non-interactive `<span aria-disabled>`
+plus adding `app/error.tsx` and `app/global-error.tsx` so future server-side
+exceptions render a friendly fallback and surface in Railway logs + Sentry.
+
+**Login form red-error bug**
+
+The login form showed a red box ("An error occurred in the Server Components
+render. The specific message is omitted in production builds…") even though
+the magic-link flow worked end-to-end (VerificationToken row created, email
+sent, redirect to `/login/check-email`). Cause: `signIn("resend")` throws
+`NEXT_REDIRECT` on the success path, and `useActionState`'s wrapper
+treated that digest as an error. Fixed by switching `sendMagicLink` to a
+proper `useActionState` action signature (`(prevState, formData) =>
+SendMagicLinkState`), passing `redirect: false` to `signIn` so it doesn't
+throw, then calling `redirect("/login/check-email")` from the action itself.
+
+**Dropdown overhaul**
+
+The original PR #4 in-workspace top bar had a switcher dropdown plus
+separate Members + Settings buttons in the right rail. The new reference
+screenshot folds everything into a single Plannable-style popover:
+
+- Top section: Wilson's wordmark + viewer first name
+- Settings and Members buttons (in-workspace context only)
+- Workspace list with all accessible workspaces, checkmark on the active one,
+  "+ New workspace" as the last item (ADMIN only)
+- Footer: Audit log (ADMIN only) and Sign out (with viewer avatar)
+
+Single shared component (`components/workspace/workspace-switcher.tsx`)
+renders both contexts ("picker" — no active workspace — and "in-workspace").
+The picker page wraps it in `<PickerHeader>` (server component that loads
+the workspaces list) so `app/page.tsx` stays a pure Server Component.
+
+**Branch / PR**
+
+- Branch: `feat/plannable-ux-v2` (built on top of `feat/plannable-style-ux`).
+- 7 PR #4 commits preserved as-is + 3 fix commits on top.
+- No new DB migration needed — `5_granular_permissions` is already applied
+  in prod.
 
 ---
 
