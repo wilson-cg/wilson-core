@@ -144,6 +144,9 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
               canEdit: invite.canEdit,
               canSend: invite.canSend,
               canAdmin: invite.canAdmin,
+              notifyOnNewProspect: invite.notifyOnNewProspect,
+              notifyOnStatusChange: invite.notifyOnStatusChange,
+              notifyOnComment: invite.notifyOnComment,
             },
             create: {
               userId,
@@ -153,6 +156,9 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
               canEdit: invite.canEdit,
               canSend: invite.canSend,
               canAdmin: invite.canAdmin,
+              notifyOnNewProspect: invite.notifyOnNewProspect,
+              notifyOnStatusChange: invite.notifyOnStatusChange,
+              notifyOnComment: invite.notifyOnComment,
             },
           });
         }
@@ -173,6 +179,9 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
               canEdit: access.canEdit,
               canSend: access.canSend,
               canAdmin: access.canAdmin,
+              notifyOnNewProspect: access.notifyOnNewProspect,
+              notifyOnStatusChange: access.notifyOnStatusChange,
+              notifyOnComment: access.notifyOnComment,
             },
             create: {
               userId,
@@ -182,6 +191,9 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
               canEdit: access.canEdit,
               canSend: access.canSend,
               canAdmin: access.canAdmin,
+              notifyOnNewProspect: access.notifyOnNewProspect,
+              notifyOnStatusChange: access.notifyOnStatusChange,
+              notifyOnComment: access.notifyOnComment,
             },
           });
         }
