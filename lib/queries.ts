@@ -156,14 +156,20 @@ export async function recentActivity(user: AuthedUser, limit = 8) {
 
 export async function prospectsForWorkspace(workspaceId: string) {
   return prisma.prospect.findMany({
-    where: { workspaceId },
+    where: { workspaceId, archived: false },
     select: {
       id: true,
       fullName: true,
       company: true,
       title: true,
       status: true,
-      fitScore: true,
+      icpScore: true,
+      icpCompanyFit: true,
+      icpSeniorityFit: true,
+      icpContextFit: true,
+      icpGeographyFit: true,
+      signalType: true,
+      approverDecision: true,
       updatedAt: true,
       assigneeId: true,
       assignee: { select: { id: true, name: true } },
@@ -174,6 +180,24 @@ export async function prospectsForWorkspace(workspaceId: string) {
       },
     },
     orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+  });
+}
+
+/** Archived prospects for the archive view. */
+export async function archivedProspectsForWorkspace(workspaceId: string) {
+  return prisma.prospect.findMany({
+    where: { workspaceId, archived: true },
+    select: {
+      id: true,
+      fullName: true,
+      company: true,
+      title: true,
+      status: true,
+      icpScore: true,
+      signalType: true,
+      updatedAt: true,
+    },
+    orderBy: { updatedAt: "desc" },
   });
 }
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireRole, requireWorkspace } from "@/lib/auth";
+import { requireWorkspace } from "@/lib/auth";
 import { prospectsForWorkspace, workspaceAssignees } from "@/lib/queries";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,17 +8,15 @@ import {
   LayoutGrid,
   List,
   Filter as FilterIcon,
+  Archive,
 } from "lucide-react";
 import { KanbanBoard, type KanbanProspect } from "./kanban-board";
 import { TableByStage } from "./table-by-stage";
 
 /**
- * Prospect CRM — pipeline board or stage-grouped table. Both views support
- * drag-and-drop: drag a card/row onto another stage to move the prospect.
- * Status change is persisted via the moveProspectToStage server action.
- *
- * This page is a server component that fetches data and hands off to the
- * DnD-enabled client components (KanbanBoard / TableByStage).
+ * Intent-tracking pipeline (V1 pivot 2026-04-30). Replaces the old "fit score"
+ * filter with an ICP-score (0-4) filter and a signal-type filter. Same DnD
+ * mechanics as before. Archived prospects live behind /prospects/archive.
  */
 export default async function WorkspaceProspectsPage({
   params,
@@ -29,16 +27,17 @@ export default async function WorkspaceProspectsPage({
     view?: string;
     q?: string;
     owner?: string;
-    fit?: string;
+    minIcp?: string;
+    signal?: string;
   }>;
 }) {
-  await requireRole("ADMIN", "TEAM_MEMBER");
   const { slug } = await params;
   const sp = await searchParams;
   const view = sp.view === "table" ? "table" : "board";
   const search = (sp.q ?? "").trim().toLowerCase();
   const ownerFilter = sp.owner ?? "";
-  const fitFilter = sp.fit ?? "";
+  const minIcp = sp.minIcp ? parseInt(sp.minIcp, 10) : 0;
+  const signalFilter = sp.signal ?? "";
 
   const { workspace } = await requireWorkspace(slug);
   const [allProspects, assignees] = await Promise.all([
@@ -46,27 +45,28 @@ export default async function WorkspaceProspectsPage({
     workspaceAssignees(workspace.id),
   ]);
 
-  // Apply filters in-memory — small dataset per workspace
   const filtered = allProspects.filter((p) => {
     if (search) {
       const hay = `${p.fullName} ${p.company} ${p.title ?? ""}`.toLowerCase();
       if (!hay.includes(search)) return false;
     }
     if (ownerFilter && p.assigneeId !== ownerFilter) return false;
-    if (fitFilter && p.fitScore !== fitFilter) return false;
+    if (minIcp > 0 && (p.icpScore ?? 0) < minIcp) return false;
+    if (signalFilter && p.signalType !== signalFilter) return false;
     return true;
   });
 
-  // Serialize for the client components (must be plain JSON)
   const serialized: KanbanProspect[] = filtered
-    .filter((p) => p.status !== "NURTURE") // nurture is a separate pool
+    .filter((p) => p.status !== "NURTURE")
     .map((p) => ({
       id: p.id,
       fullName: p.fullName,
       company: p.company,
       title: p.title,
       status: p.status,
-      fitScore: p.fitScore,
+      icpScore: p.icpScore ?? 0,
+      signalType: p.signalType ?? null,
+      approverDecision: p.approverDecision,
       updatedAt: p.updatedAt.toISOString(),
       assigneeName: p.assignee?.name ?? null,
       lastMessageStatus: p.messages[0]?.status ?? null,
@@ -74,7 +74,6 @@ export default async function WorkspaceProspectsPage({
 
   const nurture = filtered.filter((p) => p.status === "NURTURE");
 
-  // Totals for Kanban column-footer metrics
   const totals = {
     totalSent: serialized.filter((p) => p.status === "SENT").length,
     replied: serialized.filter((p) => p.status === "REPLIED").length,
@@ -89,7 +88,7 @@ export default async function WorkspaceProspectsPage({
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-wider text-[var(--color-muted-foreground)]">
-              Prospect pipeline
+              Intent-tracking pipeline
             </p>
             <h1 className="app-heading mt-0.5 text-xl text-[var(--color-charcoal)]">
               {filtered.length}{" "}
@@ -103,6 +102,11 @@ export default async function WorkspaceProspectsPage({
           </div>
           <div className="flex items-center gap-2">
             <ViewToggle slug={slug} view={view} searchParams={sp} />
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/dashboard/workspaces/${slug}/prospects/archive`}>
+                <Archive className="h-3.5 w-3.5" /> Archive
+              </Link>
+            </Button>
             <Button variant="accent" size="sm" asChild>
               <Link href={`/dashboard/workspaces/${slug}/prospects/new`}>
                 <Plus className="h-3.5 w-3.5" /> Add prospect
@@ -138,23 +142,40 @@ export default async function WorkspaceProspectsPage({
           </select>
 
           <select
-            name="fit"
-            defaultValue={fitFilter}
+            name="minIcp"
+            defaultValue={String(minIcp)}
             className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm shadow-[var(--shadow-soft)]"
           >
-            <option value="">All fits</option>
-            <option value="STRONG">Strong fit</option>
-            <option value="POSSIBLE">Possible fit</option>
-            <option value="NOT_A_FIT">Not a fit</option>
+            <option value="0">Any ICP score</option>
+            <option value="1">1+ / 4</option>
+            <option value="2">2+ / 4</option>
+            <option value="3">3+ / 4</option>
+            <option value="4">4 / 4 only</option>
+          </select>
+
+          <select
+            name="signal"
+            defaultValue={signalFilter}
+            className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm shadow-[var(--shadow-soft)]"
+          >
+            <option value="">All signals</option>
+            <option value="REACTION">Reaction</option>
+            <option value="COMMENT">Comment</option>
+            <option value="CONNECTION_REQUEST">Connection request</option>
+            <option value="POST">Post</option>
+            <option value="REPEATED_ENGAGEMENT">Repeated engagement</option>
+            <option value="CUSTOM">Custom</option>
           </select>
 
           <Button type="submit" variant="outline" size="sm">
             <FilterIcon className="h-3.5 w-3.5" /> Apply
           </Button>
 
-          {search || ownerFilter || fitFilter ? (
+          {search || ownerFilter || minIcp > 0 || signalFilter ? (
             <Button variant="ghost" size="sm" asChild>
-              <Link href={`/dashboard/workspaces/${slug}/prospects?view=${view}`}>
+              <Link
+                href={`/dashboard/workspaces/${slug}/prospects?view=${view}`}
+              >
                 Clear
               </Link>
             </Button>
@@ -201,8 +222,6 @@ export default async function WorkspaceProspectsPage({
   );
 }
 
-/* ─── View toggle ────────────────────────────────────────────── */
-
 function ViewToggle({
   slug,
   view,
@@ -210,12 +229,13 @@ function ViewToggle({
 }: {
   slug: string;
   view: "board" | "table";
-  searchParams: { q?: string; owner?: string; fit?: string };
+  searchParams: { q?: string; owner?: string; minIcp?: string; signal?: string };
 }) {
   const qs = new URLSearchParams();
   if (searchParams.q) qs.set("q", searchParams.q);
   if (searchParams.owner) qs.set("owner", searchParams.owner);
-  if (searchParams.fit) qs.set("fit", searchParams.fit);
+  if (searchParams.minIcp) qs.set("minIcp", searchParams.minIcp);
+  if (searchParams.signal) qs.set("signal", searchParams.signal);
   const base = `/dashboard/workspaces/${slug}/prospects`;
   const boardHref = `${base}?${new URLSearchParams({ ...Object.fromEntries(qs), view: "board" }).toString()}`;
   const tableHref = `${base}?${new URLSearchParams({ ...Object.fromEntries(qs), view: "table" }).toString()}`;

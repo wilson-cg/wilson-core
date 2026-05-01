@@ -28,13 +28,24 @@ import {
 
 /* ─── Prospect actions ───────────────────────────────────────── */
 
+const SIGNAL_TYPES = [
+  "REACTION",
+  "COMMENT",
+  "CONNECTION_REQUEST",
+  "POST",
+  "REPEATED_ENGAGEMENT",
+  "CUSTOM",
+] as const;
+
 const addProspectSchema = z.object({
   workspaceSlug: z.string().min(1),
   fullName: z.string().min(2),
-  company: z.string().min(1),
+  company: z.string().min(1).optional().or(z.literal("")),
   title: z.string().optional(),
-  linkedinUrl: z.string().url().or(z.literal("")).optional(),
-  fitScore: z.enum(["STRONG", "POSSIBLE", "NOT_A_FIT"]).default("POSSIBLE"),
+  linkedinUrl: z.string().url(),
+  signalType: z.enum(SIGNAL_TYPES),
+  signalContext: z.string().optional(),
+  location: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -42,34 +53,56 @@ export async function addProspect(formData: FormData) {
   const parsed = addProspectSchema.parse({
     workspaceSlug: formData.get("workspaceSlug"),
     fullName: formData.get("fullName"),
-    company: formData.get("company"),
+    company: formData.get("company") || "",
     title: formData.get("title") || undefined,
-    linkedinUrl: formData.get("linkedinUrl") || "",
-    fitScore: formData.get("fitScore") || "POSSIBLE",
+    linkedinUrl: formData.get("linkedinUrl"),
+    signalType: formData.get("signalType"),
+    signalContext: formData.get("signalContext") || undefined,
+    location: formData.get("location") || undefined,
     notes: formData.get("notes") || undefined,
   });
 
   const { user, workspace } = await requireWorkspace(parsed.workspaceSlug);
   if (user.role === "CLIENT") redirect("/client/dashboard");
 
-  await prisma.prospect.create({
-    data: {
-      workspaceId: workspace.id,
-      assigneeId: user.id,
-      fullName: parsed.fullName,
-      company: parsed.company,
-      title: parsed.title,
-      linkedinUrl:
-        parsed.linkedinUrl ||
-        `https://linkedin.com/in/${parsed.fullName.toLowerCase().replace(/[^a-z]/g, "-")}`,
-      fitScore: parsed.fitScore,
-      notes: parsed.notes,
-      status: "IDENTIFIED",
-    },
+  const created = await prisma.$transaction(async (tx) => {
+    const prospect = await tx.prospect.create({
+      data: {
+        workspaceId: workspace.id,
+        assigneeId: user.id,
+        fullName: parsed.fullName,
+        company: parsed.company || "—",
+        title: parsed.title,
+        linkedinUrl: parsed.linkedinUrl,
+        signalType: parsed.signalType,
+        signalContext: parsed.signalContext ?? null,
+        location: parsed.location ?? null,
+        notes: parsed.notes,
+        status: "IDENTIFIED",
+      },
+    });
+    await tx.prospectEvent.create({
+      data: {
+        prospectId: prospect.id,
+        workspaceId: workspace.id,
+        actorId: user.id,
+        eventType: "ADDED",
+        note: `Captured from ${humanSignal(parsed.signalType)}`,
+        occurredAt: new Date(),
+      },
+    });
+    return prospect;
   });
 
   revalidatePath(`/dashboard/workspaces/${workspace.slug}/prospects`);
-  redirect(`/dashboard/workspaces/${workspace.slug}/prospects`);
+  redirect(`/dashboard/workspaces/${workspace.slug}/prospects/${created.id}`);
+}
+
+function humanSignal(s: string) {
+  return s
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/^./, (c) => c.toUpperCase());
 }
 
 /* ─── Prospect status forward-only helper ────────────────────
@@ -82,6 +115,7 @@ export async function addProspect(formData: FormData) {
  */
 const PROSPECT_STAGE_ORDER = [
   "IDENTIFIED",
+  "NEEDS_APPROVER_DECISION",
   "MESSAGE_DRAFTED",
   "PENDING_APPROVAL",
   "APPROVED",
@@ -1223,6 +1257,7 @@ export async function removeOnboardingQuestion(formData: FormData) {
  */
 const STAGE_CANONICAL: Record<string, string> = {
   IDENTIFIED: "IDENTIFIED",
+  NEEDS_APPROVER_DECISION: "NEEDS_APPROVER_DECISION",
   DRAFTING: "MESSAGE_DRAFTED",
   SENT: "SENT",
   REPLIED: "REPLIED",
@@ -1235,6 +1270,7 @@ const moveProspectSchema = z.object({
   prospectId: z.string().min(1),
   stage: z.enum([
     "IDENTIFIED",
+    "NEEDS_APPROVER_DECISION",
     "DRAFTING",
     "SENT",
     "REPLIED",
@@ -1336,7 +1372,10 @@ const updateProspectInfoSchema = z.object({
   location: z.string().optional(),
   linkedinUrl: z.string().url().optional().or(z.literal("")),
   tags: z.string().optional(),
-  fitScore: z.enum(["STRONG", "POSSIBLE", "NOT_A_FIT"]).optional(),
+  signalType: z.enum(SIGNAL_TYPES).optional(),
+  signalContext: z.string().optional(),
+  messageAngle: z.string().optional(),
+  approverNotes: z.string().optional(),
   notes: z.string().optional(),
 });
 
@@ -1350,7 +1389,11 @@ export async function updateProspectInfo(formData: FormData) {
     location: formData.get("location") || undefined,
     linkedinUrl: formData.get("linkedinUrl") || "",
     tags: formData.get("tags") || undefined,
-    fitScore: (formData.get("fitScore") as string | null) || undefined,
+    signalType:
+      (formData.get("signalType") as string | null) || undefined,
+    signalContext: formData.get("signalContext") || undefined,
+    messageAngle: formData.get("messageAngle") || undefined,
+    approverNotes: formData.get("approverNotes") || undefined,
     notes: formData.get("notes") || undefined,
   });
   const user = await requireUser();
@@ -1374,12 +1417,207 @@ export async function updateProspectInfo(formData: FormData) {
         parsed.linkedinUrl ||
         `https://linkedin.com/in/${parsed.fullName.toLowerCase().replace(/[^a-z]/g, "-")}`,
       tags: parsed.tags ?? null,
-      fitScore: parsed.fitScore ?? prospect.fitScore,
+      signalType: parsed.signalType ?? prospect.signalType,
+      signalContext: parsed.signalContext ?? prospect.signalContext,
+      messageAngle: parsed.messageAngle ?? prospect.messageAngle,
+      approverNotes: parsed.approverNotes ?? prospect.approverNotes,
       notes: parsed.notes ?? null,
     },
   });
 
   revalidateWorkspaceProspectDetail(prospect.workspace.slug, parsed.prospectId);
+  revalidateWorkspaceProspects(prospect.workspace.slug);
+}
+
+/* ─── ICP toggles + approver decision + archive ─────────────── */
+
+const ICP_FIELDS = [
+  "icpCompanyFit",
+  "icpSeniorityFit",
+  "icpContextFit",
+  "icpGeographyFit",
+] as const;
+
+const setIcpFieldSchema = z.object({
+  prospectId: z.string().min(1),
+  field: z.enum(ICP_FIELDS),
+  value: z.enum(["true", "false"]).transform((v) => v === "true"),
+});
+
+export async function setIcpField(formData: FormData) {
+  const parsed = setIcpFieldSchema.parse({
+    prospectId: formData.get("prospectId"),
+    field: formData.get("field"),
+    value: formData.get("value"),
+  });
+  const user = await requireUser();
+  if (user.role === "CLIENT") throw new Error("Clients cannot edit ICP fit");
+
+  const prospect = await prisma.prospect.findUnique({
+    where: { id: parsed.prospectId },
+    include: { workspace: { select: { slug: true } } },
+  });
+  if (!prospect) throw new Error("Prospect not found");
+
+  // Compute the new score from the existing booleans + the toggled field.
+  const next = {
+    icpCompanyFit: prospect.icpCompanyFit,
+    icpSeniorityFit: prospect.icpSeniorityFit,
+    icpContextFit: prospect.icpContextFit,
+    icpGeographyFit: prospect.icpGeographyFit,
+  };
+  next[parsed.field] = parsed.value;
+  const score =
+    (next.icpCompanyFit ? 1 : 0) +
+    (next.icpSeniorityFit ? 1 : 0) +
+    (next.icpContextFit ? 1 : 0) +
+    (next.icpGeographyFit ? 1 : 0);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.prospect.update({
+      where: { id: parsed.prospectId },
+      data: { ...next, icpScore: score },
+    });
+    await tx.prospectEvent.create({
+      data: {
+        prospectId: parsed.prospectId,
+        workspaceId: prospect.workspaceId,
+        actorId: user.id,
+        eventType: "CUSTOM",
+        note: `${humanIcp(parsed.field)} → ${parsed.value ? "yes" : "no"} (score ${score}/4)`,
+        occurredAt: new Date(),
+      },
+    });
+  });
+
+  revalidateWorkspaceProspectDetail(prospect.workspace.slug, parsed.prospectId);
+  revalidateWorkspaceProspects(prospect.workspace.slug);
+}
+
+function humanIcp(field: string) {
+  switch (field) {
+    case "icpCompanyFit":
+      return "Company fit";
+    case "icpSeniorityFit":
+      return "Seniority fit";
+    case "icpContextFit":
+      return "Context fit";
+    case "icpGeographyFit":
+      return "Geography fit";
+    default:
+      return field;
+  }
+}
+
+const setApproverDecisionSchema = z.object({
+  prospectId: z.string().min(1),
+  decision: z.enum(["PENDING", "APPROVED", "DECLINED"]),
+});
+
+export async function setApproverDecision(formData: FormData) {
+  const parsed = setApproverDecisionSchema.parse({
+    prospectId: formData.get("prospectId"),
+    decision: formData.get("decision"),
+  });
+  const user = await requireUser();
+  if (user.role === "CLIENT")
+    throw new Error("Clients cannot set approver decision");
+
+  const prospect = await prisma.prospect.findUnique({
+    where: { id: parsed.prospectId },
+    include: { workspace: { select: { slug: true } } },
+  });
+  if (!prospect) throw new Error("Prospect not found");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.prospect.update({
+      where: { id: parsed.prospectId },
+      data: { approverDecision: parsed.decision },
+    });
+    await tx.prospectEvent.create({
+      data: {
+        prospectId: parsed.prospectId,
+        workspaceId: prospect.workspaceId,
+        actorId: user.id,
+        eventType: "CUSTOM",
+        note: `Approver decision → ${parsed.decision.toLowerCase()}`,
+        occurredAt: new Date(),
+      },
+    });
+  });
+
+  revalidateWorkspaceProspectDetail(prospect.workspace.slug, parsed.prospectId);
+  revalidateWorkspaceProspects(prospect.workspace.slug);
+}
+
+const archiveProspectSchema = z.object({
+  prospectId: z.string().min(1),
+});
+
+export async function archiveProspect(formData: FormData) {
+  const { prospectId } = archiveProspectSchema.parse({
+    prospectId: formData.get("prospectId"),
+  });
+  const user = await requireUser();
+  if (user.role === "CLIENT") throw new Error("Clients cannot archive prospects");
+
+  const prospect = await prisma.prospect.findUnique({
+    where: { id: prospectId },
+    include: { workspace: { select: { slug: true } } },
+  });
+  if (!prospect) throw new Error("Prospect not found");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.prospect.update({
+      where: { id: prospectId },
+      data: { archived: true },
+    });
+    await tx.prospectEvent.create({
+      data: {
+        prospectId,
+        workspaceId: prospect.workspaceId,
+        actorId: user.id,
+        eventType: "CUSTOM",
+        note: "Archived",
+        occurredAt: new Date(),
+      },
+    });
+  });
+
+  revalidateWorkspaceProspects(prospect.workspace.slug);
+  redirect(`/dashboard/workspaces/${prospect.workspace.slug}/prospects`);
+}
+
+export async function unarchiveProspect(formData: FormData) {
+  const { prospectId } = archiveProspectSchema.parse({
+    prospectId: formData.get("prospectId"),
+  });
+  const user = await requireUser();
+  if (user.role === "CLIENT") throw new Error("Clients cannot restore prospects");
+
+  const prospect = await prisma.prospect.findUnique({
+    where: { id: prospectId },
+    include: { workspace: { select: { slug: true } } },
+  });
+  if (!prospect) throw new Error("Prospect not found");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.prospect.update({
+      where: { id: prospectId },
+      data: { archived: false },
+    });
+    await tx.prospectEvent.create({
+      data: {
+        prospectId,
+        workspaceId: prospect.workspaceId,
+        actorId: user.id,
+        eventType: "CUSTOM",
+        note: "Restored from archive",
+        occurredAt: new Date(),
+      },
+    });
+  });
+
   revalidateWorkspaceProspects(prospect.workspace.slug);
 }
 

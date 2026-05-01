@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireRole } from "@/lib/auth";
+import { requireWorkspace } from "@/lib/auth";
 import { prospectDetail, prospectTimeline } from "@/lib/queries";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,9 @@ import { LogActivityIsland } from "./log-activity";
 import { EditInfoIsland } from "./edit-info";
 import { EditDatesIsland } from "./edit-dates";
 import { MessageThread, type ThreadMessage } from "./message-thread";
+import { IcpWidget } from "./icp-widget";
+import { DecisionRadio } from "./decision-radio";
+import { ArchiveButton } from "./archive-button";
 
 /**
  * Prospect workbench — full CRM view with multi-message thread.
@@ -44,11 +47,13 @@ export default async function ProspectDetailPage({
 }: {
   params: Promise<{ slug: string; id: string }>;
 }) {
-  await requireRole("ADMIN", "TEAM_MEMBER");
   const { slug, id } = await params;
+  // Gate by workspace membership (CLIENT users land here too in V1).
+  const { user } = await requireWorkspace(slug);
   const prospect = await prospectDetail(id);
   if (!prospect) notFound();
   if (prospect.workspace.slug !== slug) notFound();
+  const canEdit = user.role !== "CLIENT";
 
   const timeline = await prospectTimeline(prospect.id);
 
@@ -89,12 +94,17 @@ export default async function ProspectDetailPage({
               {prospect.company}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <Badge variant={fitToBadge(prospect.fitScore)}>
-                {humanizeFit(prospect.fitScore)}
+              <Badge variant={icpBadge(prospect.icpScore)}>
+                ICP {prospect.icpScore}/4
               </Badge>
               <Badge variant={statusToBadge(prospect.status)}>
                 {humanizeStatus(prospect.status)}
               </Badge>
+              {prospect.signalType ? (
+                <span className="inline-flex items-center rounded-full border bg-[var(--color-virgil)] px-2 py-px text-[10px] text-[var(--color-charcoal-500)]">
+                  {humanizeStatus(prospect.signalType)}
+                </span>
+              ) : null}
               {prospect.assignee ? (
                 <span className="text-xs text-[var(--color-muted-foreground)]">
                   Owner: {prospect.assignee.name}
@@ -108,18 +118,23 @@ export default async function ProspectDetailPage({
                 LinkedIn <ExternalLink className="h-3.5 w-3.5" />
               </a>
             </Button>
-            <EditInfoIsland
-              prospectId={prospect.id}
-              fullName={prospect.fullName}
-              title={prospect.title}
-              company={prospect.company}
-              email={prospect.email}
-              location={prospect.location}
-              linkedinUrl={prospect.linkedinUrl}
-              tags={prospect.tags}
-              fitScore={prospect.fitScore}
-              notes={prospect.notes}
-            />
+            {canEdit ? (
+              <EditInfoIsland
+                prospectId={prospect.id}
+                fullName={prospect.fullName}
+                title={prospect.title}
+                company={prospect.company}
+                email={prospect.email}
+                location={prospect.location}
+                linkedinUrl={prospect.linkedinUrl}
+                tags={prospect.tags}
+                signalType={prospect.signalType}
+                signalContext={prospect.signalContext}
+                messageAngle={prospect.messageAngle}
+                approverNotes={prospect.approverNotes}
+                notes={prospect.notes}
+              />
+            ) : null}
           </div>
         </div>
       </header>
@@ -138,6 +153,56 @@ export default async function ProspectDetailPage({
 
         {/* RIGHT — CRM info panel */}
         <aside className="space-y-4">
+          {canEdit ? (
+            <IcpWidget
+              prospectId={prospect.id}
+              icpCompanyFit={prospect.icpCompanyFit}
+              icpSeniorityFit={prospect.icpSeniorityFit}
+              icpContextFit={prospect.icpContextFit}
+              icpGeographyFit={prospect.icpGeographyFit}
+            />
+          ) : null}
+
+          {canEdit ? (
+            <DecisionRadio
+              prospectId={prospect.id}
+              initial={prospect.approverDecision}
+            />
+          ) : null}
+
+          {prospect.signalContext ? (
+            <section className="rounded-[var(--radius-md)] border bg-[var(--color-virgil)] p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
+                Signal context
+              </div>
+              <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
+                {prospect.signalContext}
+              </p>
+            </section>
+          ) : null}
+
+          {prospect.messageAngle ? (
+            <section className="rounded-[var(--radius-md)] border bg-[var(--color-bee)]/15 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-charcoal-500)]">
+                Message angle
+              </div>
+              <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
+                {prospect.messageAngle}
+              </p>
+            </section>
+          ) : null}
+
+          {prospect.approverNotes ? (
+            <section className="rounded-[var(--radius-md)] border bg-[var(--color-aperol)]/15 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-charcoal-500)]">
+                Approver notes
+              </div>
+              <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
+                {prospect.approverNotes}
+              </p>
+            </section>
+          ) : null}
+
           <section className="overflow-hidden rounded-[var(--radius-md)] border bg-[var(--color-surface)] shadow-[var(--shadow-soft)]">
             <div className="border-b border-[var(--color-border)] bg-[var(--color-virgil)] px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
               Contact
@@ -241,6 +306,12 @@ export default async function ProspectDetailPage({
                 {prospect.workspace.icp.toneOfVoice}
               </p>
             </section>
+          ) : null}
+
+          {canEdit ? (
+            <div className="border-t border-[var(--color-border)] pt-3">
+              <ArchiveButton prospectId={prospect.id} />
+            </div>
           ) : null}
         </aside>
       </div>
@@ -421,16 +492,10 @@ function toDateInput(d: Date | null): string | null {
   return d.toISOString().slice(0, 10);
 }
 
-function fitToBadge(s: string) {
-  if (s === "STRONG") return "approved" as const;
-  if (s === "NOT_A_FIT") return "rejected" as const;
-  return "drafted" as const;
-}
-
-function humanizeFit(s: string) {
-  if (s === "STRONG") return "Strong fit";
-  if (s === "NOT_A_FIT") return "Not a fit";
-  return "Possible fit";
+function icpBadge(score: number) {
+  if (score >= 4) return "approved" as const;
+  if (score >= 2) return "drafted" as const;
+  return "rejected" as const;
 }
 
 function statusToBadge(s: string) {
@@ -447,6 +512,7 @@ function statusToBadge(s: string) {
     | "nurture"
   > = {
     IDENTIFIED: "identified",
+    NEEDS_APPROVER_DECISION: "pending",
     MESSAGE_DRAFTED: "drafted",
     PENDING_APPROVAL: "pending",
     APPROVED: "approved",

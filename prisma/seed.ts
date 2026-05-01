@@ -868,7 +868,13 @@ async function seedProspect(
       email: `${emailHandle}@${companyDomain}.com`,
       location,
       tags,
-      fitScore: input.fit,
+      // V1 pivot: fitScore enum is gone. Map old seed values to ICP booleans.
+      icpCompanyFit: input.fit === "STRONG" || input.fit === "POSSIBLE",
+      icpSeniorityFit: input.fit === "STRONG" || input.fit === "POSSIBLE",
+      icpContextFit: input.fit === "STRONG",
+      icpGeographyFit: input.fit === "STRONG",
+      icpScore:
+        input.fit === "STRONG" ? 4 : input.fit === "POSSIBLE" ? 2 : 0,
       status: input.status,
       linkedinConnectedAt: daysAgo(connectionOffsetDays),
       lastContactedAt: input.message?.sentDaysAgo !== undefined

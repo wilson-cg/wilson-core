@@ -247,8 +247,8 @@ function DraggableRow({
         {prospect.company}
       </Link>
       <div>
-        <Badge variant={fitBadge(prospect.fitScore)}>
-          {humanizeFit(prospect.fitScore)}
+        <Badge variant={icpBadge(prospect.icpScore)}>
+          ICP {prospect.icpScore}/4
         </Badge>
       </div>
       <div className="truncate text-xs text-[var(--color-charcoal-500)]">
@@ -280,6 +280,8 @@ function stageCanonical(stage: StageKey): string {
   switch (stage) {
     case "IDENTIFIED":
       return "IDENTIFIED";
+    case "NEEDS_APPROVER_DECISION":
+      return "NEEDS_APPROVER_DECISION";
     case "DRAFTING":
       return "MESSAGE_DRAFTED";
     case "SENT":
@@ -303,6 +305,8 @@ function statusStage(status: string): StageKey | null {
 function stageTone(stage: StageKey): string {
   const map: Record<StageKey, string> = {
     IDENTIFIED: "bg-[var(--color-virgil-dark)] text-[var(--color-charcoal)]",
+    NEEDS_APPROVER_DECISION:
+      "bg-[var(--color-grapefruit)]/30 text-[var(--color-charcoal)]",
     DRAFTING: "bg-[var(--color-bee)]/40 text-[var(--color-charcoal)]",
     SENT: "bg-[var(--color-teal)]/50 text-[var(--color-forest-950)]",
     REPLIED: "bg-[var(--color-aperol)]/25 text-[var(--color-charcoal)]",
@@ -313,14 +317,8 @@ function stageTone(stage: StageKey): string {
   return map[stage];
 }
 
-function fitBadge(s: string) {
-  if (s === "STRONG") return "approved" as const;
-  if (s === "NOT_A_FIT") return "rejected" as const;
-  return "drafted" as const;
-}
-
-function humanizeFit(s: string) {
-  if (s === "STRONG") return "Strong fit";
-  if (s === "NOT_A_FIT") return "Not a fit";
-  return "Possible fit";
+function icpBadge(score: number) {
+  if (score >= 4) return "approved" as const;
+  if (score >= 2) return "drafted" as const;
+  return "rejected" as const;
 }
