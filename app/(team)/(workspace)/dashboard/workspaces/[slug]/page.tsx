@@ -6,5 +6,5 @@ export default async function WorkspaceRoot({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  redirect(`/dashboard/workspaces/${slug}/content`);
+  redirect(`/dashboard/workspaces/${slug}/prospects`);
 }

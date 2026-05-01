@@ -7,7 +7,6 @@ import { NavItemClient } from "@/app/(team)/nav-item";
 import { prisma } from "@/lib/db";
 import {
   ArrowLeft,
-  Layout as LayoutIcon,
   Users,
   Sparkles,
   Settings,
@@ -30,21 +29,19 @@ export default async function WorkspaceLayout({
   children: React.ReactNode;
   params: Promise<{ slug: string }>;
 }) {
-  await requireRole("ADMIN", "TEAM_MEMBER");
+  // V1 pivot (2026-04-30): CLIENT role can render this layout too.
+  // requireWorkspace() below already gates by Membership for CLIENTs, so
+  // the access boundary stays correct. Decision: option (b) softening over
+  // moving routes — smaller diff, same security.
+  await requireRole("ADMIN", "TEAM_MEMBER", "CLIENT");
   const { slug } = await params;
   const { user, workspace } = await requireWorkspace(slug);
   if (!workspace) notFound();
 
-  // Pending counts for sidebar badges
-  const [pendingPosts, pendingMessages] = await Promise.all([
-    prisma.post.count({
-      where: { workspaceId: workspace.id, status: "PENDING_APPROVAL" },
-    }),
-    prisma.message.count({
-      where: { workspaceId: workspace.id, status: "PENDING_APPROVAL" },
-    }),
-  ]);
-  const totalPending = pendingPosts + pendingMessages;
+  // Pending counts for sidebar badges (messages only — content surface is hidden in V1)
+  const pendingMessages = await prisma.message.count({
+    where: { workspaceId: workspace.id, status: "PENDING_APPROVAL" },
+  });
 
   return (
     <div className="flex min-h-screen bg-[var(--color-background)]">
@@ -80,13 +77,7 @@ export default async function WorkspaceLayout({
           <div className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-charcoal-300)]">
             Main
           </div>
-          <NavItemClient
-            href={`/dashboard/workspaces/${slug}/content`}
-            label="Content"
-            badge={pendingPosts > 0 ? String(pendingPosts) : undefined}
-          >
-            <LayoutIcon className="h-4 w-4 shrink-0" />
-          </NavItemClient>
+          {/* HIDDEN-V1: Content nav removed per 2026-04-30 client meeting. */}
           <NavItemClient
             href={`/dashboard/workspaces/${slug}/prospects`}
             label="Prospects"
@@ -95,9 +86,8 @@ export default async function WorkspaceLayout({
             <Users className="h-4 w-4 shrink-0" />
           </NavItemClient>
           <NavItemClient
-            href={`/dashboard/workspaces/${slug}/approvals`}
-            label="Approvals"
-            badge={totalPending > 0 ? String(totalPending) : undefined}
+            href={`/dashboard/workspaces/${slug}/prospects/archive`}
+            label="Archive"
           >
             <CheckCircle2 className="h-4 w-4 shrink-0" />
           </NavItemClient>
