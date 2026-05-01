@@ -210,7 +210,7 @@ model Icp {
 // ─── Prospects ──────────────────────────────────────────────────
 
 model Prospect {
-  id                  String         @id @default(cuid())
+  id                  String             @id @default(cuid())
   workspaceId         String
   fullName            String
   linkedinUrl         String
@@ -219,14 +219,26 @@ model Prospect {
   email               String? // Optional; many prospects won't have an email known
   location            String? // Freeform city / region
   tags                String? // Comma-separated for v1 simplicity
-  fitScore            FitScore       @default(POSSIBLE)
-  status              ProspectStatus @default(IDENTIFIED)
+  // V1 intent-tracking pivot — see CSV columns Signal Type / Post Engagement Context.
+  signalType          SignalType?
+  signalContext       String? // Free text: link or quote of the post / engagement.
+  // ICP fit toggles + computed score (0–4). Recomputed in app code on every flip.
+  icpCompanyFit       Boolean            @default(false)
+  icpSeniorityFit     Boolean            @default(false)
+  icpContextFit       Boolean            @default(false)
+  icpGeographyFit     Boolean            @default(false)
+  icpScore            Int                @default(0)
+  approverDecision    ApproverDecision   @default(PENDING)
+  messageAngle        String? // "keep casual", "met him at an event", etc.
+  approverNotes       String? // Free text the approver writes (separate from internal notes).
+  archived            Boolean            @default(false)
+  status              ProspectStatus     @default(IDENTIFIED)
   assigneeId          String?
   notes               String? // Internal-only free text
   linkedinConnectedAt DateTime? // When we connected with them on LinkedIn
   lastContactedAt     DateTime? // Last outbound contact (editable, overrides derived)
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   assignee  User?           @relation("Assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
@@ -274,14 +286,24 @@ enum ProspectEventType {
   CUSTOM
 }
 
-enum FitScore {
-  STRONG
-  POSSIBLE
-  NOT_A_FIT
+enum SignalType {
+  REACTION
+  COMMENT
+  CONNECTION_REQUEST
+  POST
+  REPEATED_ENGAGEMENT
+  CUSTOM
+}
+
+enum ApproverDecision {
+  PENDING
+  APPROVED
+  DECLINED
 }
 
 enum ProspectStatus {
   IDENTIFIED
+  NEEDS_APPROVER_DECISION
   MESSAGE_DRAFTED
   PENDING_APPROVAL
   APPROVED
