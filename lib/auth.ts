@@ -138,21 +138,11 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
                 workspaceId: invite.workspaceId,
               },
             },
-            update: {
-              role: invite.workspaceRole,
-              canApprove: invite.canApprove,
-              canEdit: invite.canEdit,
-              canSend: invite.canSend,
-              canAdmin: invite.canAdmin,
-            },
+            update: { role: invite.workspaceRole },
             create: {
               userId,
               workspaceId: invite.workspaceId,
               role: invite.workspaceRole,
-              canApprove: invite.canApprove,
-              canEdit: invite.canEdit,
-              canSend: invite.canSend,
-              canAdmin: invite.canAdmin,
             },
           });
         }
@@ -167,21 +157,11 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
                 workspaceId: access.workspaceId,
               },
             },
-            update: {
-              role: access.workspaceRole,
-              canApprove: access.canApprove,
-              canEdit: access.canEdit,
-              canSend: access.canSend,
-              canAdmin: access.canAdmin,
-            },
+            update: { role: access.workspaceRole },
             create: {
               userId,
               workspaceId: access.workspaceId,
               role: access.workspaceRole,
-              canApprove: access.canApprove,
-              canEdit: access.canEdit,
-              canSend: access.canSend,
-              canAdmin: access.canAdmin,
             },
           });
         }

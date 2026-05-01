@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireWorkspace } from "@/lib/auth";
-import { permissionsForWorkspace } from "@/lib/permissions";
 import { prospectDetail, prospectTimeline } from "@/lib/queries";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,22 +30,17 @@ import { DecisionRadio } from "./decision-radio";
 import { ArchiveButton } from "./archive-button";
 
 /**
- * Prospect detail page (V1 UX overhaul, 2026-05-01).
+ * Prospect workbench — full CRM view with multi-message thread.
  *
- * Restructured into the 5 CSV-aligned sections from the intent-tracking
- * pipeline:
- *
- *   1. CAPTURE   — name, LinkedIn, title, company, signal type + context
- *   2. ICP FIT   — big score ring + 4 toggles  (gated on canApprove)
- *   3. DECISION  — approver decision radio, message angle, approver notes
- *                 (gated on canApprove)
- *   4. MESSAGE   — message thread + draft + approve dates + sent date
- *                 (gated on canEdit / canSend per action)
- *   5. OUTCOME   — replied, meeting booked, meeting date, outcome notes
- *                 (gated on canSend)
- *
- * The activity timeline + contact card stay in a right rail. ICP, decision,
- * and signal context move into the main column for visual prominence.
+ * Layout (two-column on large screens):
+ *   Left column:
+ *     - Prospect header (name, title/company, fit + status badges)
+ *     - Message thread (every outbound message + their statuses)
+ *     - Activity timeline (ProspectEvents + MessageEvents merged)
+ *   Right rail:
+ *     - CRM info panel (LinkedIn, email, location, tags, dates, assignee)
+ *     - Log activity quick form
+ *     - ICP voice reference
  */
 export default async function ProspectDetailPage({
   params,
@@ -54,15 +48,16 @@ export default async function ProspectDetailPage({
   params: Promise<{ slug: string; id: string }>;
 }) {
   const { slug, id } = await params;
-  const { user, workspace } = await requireWorkspace(slug);
+  // Gate by workspace membership (CLIENT users land here too in V1).
+  const { user } = await requireWorkspace(slug);
   const prospect = await prospectDetail(id);
   if (!prospect) notFound();
   if (prospect.workspace.slug !== slug) notFound();
-
-  const perms = permissionsForWorkspace(user, workspace.id);
+  const canEdit = user.role !== "CLIENT";
 
   const timeline = await prospectTimeline(prospect.id);
 
+  // Serialize messages for the client island (newest first)
   const threadMessages: ThreadMessage[] = prospect.messages.map((m) => ({
     id: m.id,
     body: m.body,
@@ -99,9 +94,17 @@ export default async function ProspectDetailPage({
               {prospect.company}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge variant={icpBadge(prospect.icpScore)}>
+                ICP {prospect.icpScore}/4
+              </Badge>
               <Badge variant={statusToBadge(prospect.status)}>
                 {humanizeStatus(prospect.status)}
               </Badge>
+              {prospect.signalType ? (
+                <span className="inline-flex items-center rounded-full border bg-[var(--color-virgil)] px-2 py-px text-[10px] text-[var(--color-charcoal-500)]">
+                  {humanizeStatus(prospect.signalType)}
+                </span>
+              ) : null}
               {prospect.assignee ? (
                 <span className="text-xs text-[var(--color-muted-foreground)]">
                   Owner: {prospect.assignee.name}
@@ -115,7 +118,7 @@ export default async function ProspectDetailPage({
                 LinkedIn <ExternalLink className="h-3.5 w-3.5" />
               </a>
             </Button>
-            {perms.canEdit ? (
+            {canEdit ? (
               <EditInfoIsland
                 prospectId={prospect.id}
                 fullName={prospect.fullName}
@@ -137,140 +140,69 @@ export default async function ProspectDetailPage({
       </header>
 
       <div className="mx-auto grid max-w-6xl gap-6 px-8 py-8 lg:grid-cols-[1fr_340px]">
-        {/* MAIN — the five CSV-aligned sections */}
-        <main className="space-y-6">
-          {/* 1. CAPTURE */}
-          <SectionCard heading="1. Capture" subhead="Where this prospect came from.">
-            <dl className="grid grid-cols-2 gap-3 text-xs">
-              <Field label="Name">{prospect.fullName}</Field>
-              <Field label="LinkedIn">
-                <a
-                  href={prospect.linkedinUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="truncate text-[var(--color-forest)] hover:underline"
-                >
-                  {prospect.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\//, "")}
-                </a>
-              </Field>
-              <Field label="Title">{prospect.title ?? "—"}</Field>
-              <Field label="Company">{prospect.company}</Field>
-              <Field label="Signal type">
-                {prospect.signalType ? humanizeStatus(prospect.signalType) : "—"}
-              </Field>
-              <Field label="Captured">
-                {format(prospect.createdAt, "d MMM yyyy")}
-              </Field>
-            </dl>
-            {prospect.signalContext ? (
-              <div className="mt-3 rounded-[var(--radius-sm)] border bg-[var(--color-virgil)] p-2.5">
-                <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
-                  Signal context
-                </div>
-                <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
-                  {prospect.signalContext}
-                </p>
-              </div>
-            ) : null}
-          </SectionCard>
+        {/* LEFT — message thread + timeline */}
+        <main className="space-y-8">
+          <MessageThread
+            prospectId={prospect.id}
+            prospectName={prospect.fullName}
+            messages={threadMessages}
+          />
 
-          {/* 2. ICP FIT */}
-          <SectionCard
-            heading="2. ICP fit"
-            subhead={
-              perms.canApprove
-                ? "Toggle each criterion as you score."
-                : "Only approvers can edit ICP fit."
-            }
-          >
+          <Timeline entries={timeline} />
+        </main>
+
+        {/* RIGHT — CRM info panel */}
+        <aside className="space-y-4">
+          {canEdit ? (
             <IcpWidget
               prospectId={prospect.id}
               icpCompanyFit={prospect.icpCompanyFit}
               icpSeniorityFit={prospect.icpSeniorityFit}
               icpContextFit={prospect.icpContextFit}
               icpGeographyFit={prospect.icpGeographyFit}
-              canEdit={perms.canApprove}
             />
-          </SectionCard>
+          ) : null}
 
-          {/* 3. DECISION */}
-          <SectionCard
-            heading="3. Decision"
-            subhead={
-              perms.canApprove
-                ? "Approver call. The team waits on this before drafting."
-                : "Read-only — only approvers can change the decision."
-            }
-          >
-            <div className="space-y-3">
-              <DecisionRadio
-                prospectId={prospect.id}
-                initial={prospect.approverDecision}
-                canEdit={perms.canApprove}
-              />
-              {prospect.messageAngle ? (
-                <div className="rounded-[var(--radius-sm)] border bg-[var(--color-bee)]/15 p-2.5">
-                  <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-charcoal-500)]">
-                    Message angle
-                  </div>
-                  <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
-                    {prospect.messageAngle}
-                  </p>
-                </div>
-              ) : null}
-              {prospect.approverNotes ? (
-                <div className="rounded-[var(--radius-sm)] border bg-[var(--color-aperol)]/15 p-2.5">
-                  <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-charcoal-500)]">
-                    Approver notes
-                  </div>
-                  <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
-                    {prospect.approverNotes}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          </SectionCard>
-
-          {/* 4. MESSAGE */}
-          <SectionCard
-            heading="4. Message"
-            subhead={
-              perms.canEdit || perms.canSend
-                ? "Draft, approve, send. All previous versions stay below."
-                : "Read-only message history."
-            }
-          >
-            <MessageThread
+          {canEdit ? (
+            <DecisionRadio
               prospectId={prospect.id}
-              prospectName={prospect.fullName}
-              messages={threadMessages}
+              initial={prospect.approverDecision}
             />
-          </SectionCard>
+          ) : null}
 
-          {/* 5. OUTCOME */}
-          <SectionCard
-            heading="5. Outcome"
-            subhead={
-              perms.canSend
-                ? "What happened after we sent."
-                : "Read-only — only senders can update outcome."
-            }
-          >
-            <OutcomePanel
-              messages={threadMessages}
-              status={prospect.status}
-              lastContactedAt={prospect.lastContactedAt}
-              linkedinConnectedAt={prospect.linkedinConnectedAt}
-              prospectId={prospect.id}
-              canSend={perms.canSend}
-            />
-          </SectionCard>
+          {prospect.signalContext ? (
+            <section className="rounded-[var(--radius-md)] border bg-[var(--color-virgil)] p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
+                Signal context
+              </div>
+              <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
+                {prospect.signalContext}
+              </p>
+            </section>
+          ) : null}
 
-          <Timeline entries={timeline} />
-        </main>
+          {prospect.messageAngle ? (
+            <section className="rounded-[var(--radius-md)] border bg-[var(--color-bee)]/15 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-charcoal-500)]">
+                Message angle
+              </div>
+              <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
+                {prospect.messageAngle}
+              </p>
+            </section>
+          ) : null}
 
-        {/* RIGHT RAIL — contact + activity */}
-        <aside className="space-y-4">
+          {prospect.approverNotes ? (
+            <section className="rounded-[var(--radius-md)] border bg-[var(--color-aperol)]/15 p-3">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-charcoal-500)]">
+                Approver notes
+              </div>
+              <p className="whitespace-pre-line text-xs text-[var(--color-charcoal)]">
+                {prospect.approverNotes}
+              </p>
+            </section>
+          ) : null}
+
           <section className="overflow-hidden rounded-[var(--radius-md)] border bg-[var(--color-surface)] shadow-[var(--shadow-soft)]">
             <div className="border-b border-[var(--color-border)] bg-[var(--color-virgil)] px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
               Contact
@@ -337,16 +269,22 @@ export default async function ProspectDetailPage({
               linkedinConnectedAt={toDateInput(prospect.linkedinConnectedAt)}
               lastContactedAt={toDateInput(prospect.lastContactedAt)}
             />
+            <div className="flex items-center justify-between gap-3 border-t border-[var(--color-border)] px-3 py-2">
+              <span className="text-[11px] text-[var(--color-muted-foreground)]">
+                Added
+              </span>
+              <span className="text-xs text-[var(--color-charcoal)]">
+                {format(prospect.createdAt, "d MMM yyyy")}
+              </span>
+            </div>
           </section>
 
-          {perms.canSend ? (
-            <section className="rounded-[var(--radius-md)] border bg-[var(--color-surface)] p-3 shadow-[var(--shadow-soft)]">
-              <div className="mb-2 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
-                Activity
-              </div>
-              <LogActivityIsland prospectId={prospect.id} />
-            </section>
-          ) : null}
+          <section className="rounded-[var(--radius-md)] border bg-[var(--color-surface)] p-3 shadow-[var(--shadow-soft)]">
+            <div className="mb-2 text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
+              Activity
+            </div>
+            <LogActivityIsland prospectId={prospect.id} />
+          </section>
 
           {prospect.notes ? (
             <section className="rounded-[var(--radius-md)] border bg-[var(--color-bee)]/15 p-3">
@@ -370,7 +308,7 @@ export default async function ProspectDetailPage({
             </section>
           ) : null}
 
-          {perms.canEdit ? (
+          {canEdit ? (
             <div className="border-t border-[var(--color-border)] pt-3">
               <ArchiveButton prospectId={prospect.id} />
             </div>
@@ -378,124 +316,6 @@ export default async function ProspectDetailPage({
         </aside>
       </div>
     </div>
-  );
-}
-
-/* ─── Section card ──────────────────────────────────────────── */
-
-function SectionCard({
-  heading,
-  subhead,
-  children,
-}: {
-  heading: string;
-  subhead?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-soft)]">
-      <h2 className="app-heading text-lg text-[var(--color-charcoal)]">
-        {heading}
-      </h2>
-      {subhead ? (
-        <p className="mt-0.5 text-xs text-[var(--color-muted-foreground)]">
-          {subhead}
-        </p>
-      ) : null}
-      <div className="mt-3">{children}</div>
-    </section>
-  );
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <dt className="text-[10px] uppercase tracking-wider text-[var(--color-muted-foreground)]">
-        {label}
-      </dt>
-      <dd className="mt-0.5 truncate text-[var(--color-charcoal)]">
-        {children}
-      </dd>
-    </div>
-  );
-}
-
-/* ─── Outcome panel ─────────────────────────────────────────── */
-
-function OutcomePanel({
-  messages,
-  status,
-  lastContactedAt,
-  linkedinConnectedAt,
-  canSend,
-}: {
-  messages: ThreadMessage[];
-  status: string;
-  lastContactedAt: Date | null;
-  linkedinConnectedAt: Date | null;
-  prospectId: string;
-  canSend: boolean;
-}) {
-  const lastReply = messages.find((m) => m.repliedAt);
-  const lastSent = messages.find((m) => m.sentAt);
-  return (
-    <dl className="grid grid-cols-2 gap-3 text-xs">
-      <Field label="Replied">
-        {lastReply ? (
-          <span className="text-[var(--color-forest)]">
-            {format(new Date(lastReply.repliedAt!), "d MMM yyyy")}
-          </span>
-        ) : (
-          <span className="italic text-[var(--color-muted-foreground)]">
-            Not yet
-          </span>
-        )}
-      </Field>
-      <Field label="Last sent">
-        {lastSent ? (
-          <span className="text-[var(--color-charcoal)]">
-            {format(new Date(lastSent.sentAt!), "d MMM yyyy")}
-          </span>
-        ) : (
-          <span className="italic text-[var(--color-muted-foreground)]">
-            Not yet
-          </span>
-        )}
-      </Field>
-      <Field label="Meeting booked">
-        {status === "MEETING_BOOKED" ? (
-          <span className="text-[var(--color-forest)]">Yes</span>
-        ) : (
-          <span className="italic text-[var(--color-muted-foreground)]">No</span>
-        )}
-      </Field>
-      <Field label="Last contacted">
-        {lastContactedAt
-          ? format(lastContactedAt, "d MMM yyyy")
-          : "—"}
-      </Field>
-      <Field label="LinkedIn connected">
-        {linkedinConnectedAt
-          ? format(linkedinConnectedAt, "d MMM yyyy")
-          : "—"}
-      </Field>
-      <Field label="Status">
-        <span className="text-[var(--color-charcoal)]">
-          {humanizeStatus(status)}
-        </span>
-      </Field>
-      {!canSend ? (
-        <div className="col-span-2 rounded-[var(--radius-sm)] border border-dashed border-[var(--color-border)] bg-[var(--color-virgil)] px-2 py-1.5 text-[10px] italic text-[var(--color-muted-foreground)]">
-          You don&rsquo;t have send permission, so outcome fields are read-only.
-        </div>
-      ) : null}
-    </dl>
   );
 }
 
@@ -670,6 +490,12 @@ function initials(name: string) {
 function toDateInput(d: Date | null): string | null {
   if (!d) return null;
   return d.toISOString().slice(0, 10);
+}
+
+function icpBadge(score: number) {
+  if (score >= 4) return "approved" as const;
+  if (score >= 2) return "drafted" as const;
+  return "rejected" as const;
 }
 
 function statusToBadge(s: string) {

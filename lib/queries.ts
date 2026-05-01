@@ -152,87 +152,6 @@ export async function recentActivity(user: AuthedUser, limit = 8) {
   });
 }
 
-/**
- * Workspace cards for the V1 picker home page (app/page.tsx).
- *
- * Each card shows:
- *   - workspace name + logo / first contact photo / initials
- *   - "N awaiting your decision"  (NEEDS_APPROVER_DECISION + PENDING_APPROVAL)
- *   - "M total"                   (non-archived prospects)
- *   - "Avg ICP score: X.Y / 4"    (mean icpScore across non-archived prospects)
- *   - last activity timestamp     (most recent ProspectEvent.occurredAt)
- *   - up to 3 member avatars      (Membership rows w/ user)
- */
-export async function workspacePickerCards(user: AuthedUser) {
-  const workspaceIds = await accessibleWorkspaceIds(user);
-
-  const workspaces = await prisma.workspace.findMany({
-    where: { id: { in: workspaceIds } },
-    select: {
-      id: true,
-      slug: true,
-      name: true,
-      contactName: true,
-      logoUrl: true,
-      accentColor: true,
-      contacts: {
-        where: { isPrimary: true },
-        take: 1,
-        select: { fullName: true },
-      },
-      memberships: {
-        select: {
-          id: true,
-          user: {
-            select: { id: true, name: true, email: true, image: true },
-          },
-        },
-        take: 6,
-      },
-      prospects: {
-        where: { archived: false },
-        select: { id: true, status: true, icpScore: true },
-      },
-      prospectEvents: {
-        orderBy: { occurredAt: "desc" },
-        take: 1,
-        select: { occurredAt: true },
-      },
-    },
-    orderBy: { name: "asc" },
-  });
-
-  return workspaces.map((w) => {
-    const total = w.prospects.length;
-    const awaiting = w.prospects.filter(
-      (p) =>
-        p.status === "NEEDS_APPROVER_DECISION" ||
-        p.status === "PENDING_APPROVAL"
-    ).length;
-    const avgIcp =
-      total > 0
-        ? w.prospects.reduce((sum, p) => sum + p.icpScore, 0) / total
-        : null;
-    return {
-      id: w.id,
-      slug: w.slug,
-      name: w.name,
-      logoUrl: w.logoUrl,
-      accentColor: w.accentColor,
-      contactName: w.contacts[0]?.fullName ?? w.contactName,
-      total,
-      awaiting,
-      avgIcp,
-      members: w.memberships.map((m) => ({
-        id: m.user.id,
-        name: m.user.name ?? m.user.email,
-        image: m.user.image,
-      })),
-      lastActivity: w.prospectEvents[0]?.occurredAt ?? null,
-    };
-  });
-}
-
 /* ─── Workspace detail ───────────────────────────────────────── */
 
 export async function prospectsForWorkspace(workspaceId: string) {
@@ -296,43 +215,6 @@ export async function workspaceSettings(workspaceId: string) {
     }),
   ]);
   return { workspace, contacts, onboarding };
-}
-
-/**
- * Full members + permissions matrix for the Members modal. Returns every
- * Membership row in the workspace plus the user data needed to render the
- * row (name, email, image), plus the permission flag set.
- */
-export async function workspaceMembersForModal(workspaceId: string) {
-  const memberships = await prisma.membership.findMany({
-    where: { workspaceId },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          image: true,
-          role: true,
-        },
-      },
-    },
-    orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-  });
-  return memberships.map((m) => ({
-    membershipId: m.id,
-    userId: m.user.id,
-    name: m.user.name ?? m.user.email,
-    email: m.user.email,
-    image: m.user.image,
-    systemRole: m.user.role,
-    workspaceRole: m.role,
-    canApprove: m.canApprove,
-    canEdit: m.canEdit,
-    canSend: m.canSend,
-    canAdmin: m.canAdmin,
-    notifyOnApprovalRequested: m.notifyOnApprovalRequested,
-  }));
 }
 
 /** Team members (non-client) who have access to this workspace. */

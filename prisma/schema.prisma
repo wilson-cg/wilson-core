@@ -105,12 +105,6 @@ model Invite {
   workspaceId   String?
   workspace     Workspace?     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   workspaceRole WorkspaceRole?
-  // Granular permission preset baked into the invite. Applied to the new
-  // Membership row when the invitee accepts.
-  canApprove    Boolean        @default(false)
-  canEdit       Boolean        @default(false)
-  canSend       Boolean        @default(false)
-  canAdmin      Boolean        @default(false)
   invitedById   String
   invitedBy     User           @relation("InviteSender", fields: [invitedById], references: [id])
   expiresAt     DateTime
@@ -133,11 +127,6 @@ model InviteWorkspaceAccess {
   inviteId      String
   workspaceId   String
   workspaceRole WorkspaceRole
-  // Per-workspace permission preset for multi-workspace invites.
-  canApprove    Boolean       @default(false)
-  canEdit       Boolean       @default(false)
-  canSend       Boolean       @default(false)
-  canAdmin      Boolean       @default(false)
 
   invite    Invite    @relation(fields: [inviteId], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -158,19 +147,7 @@ model Membership {
   userId      String
   workspaceId String
   role        WorkspaceRole
-  // Granular per-action permissions (V1 UX overhaul, 2026-05-01).
-  // canView is implicit: every Membership row implies View access.
-  // canApprove → toggle ICP fits, set approver decision, write approver notes.
-  // canEdit    → capture/edit prospect fields, archive/unarchive, draft messages.
-  // canSend    → mark sent/replied/meeting-booked, edit outcome fields.
-  // canAdmin   → workspace settings + members + danger zone.
-  canApprove                   Boolean       @default(false)
-  canEdit                      Boolean       @default(false)
-  canSend                      Boolean       @default(false)
-  canAdmin                     Boolean       @default(false)
-  // Notifications preference (Members modal → Notifications tab).
-  notifyOnApprovalRequested    Boolean       @default(true)
-  createdAt                    DateTime      @default(now())
+  createdAt   DateTime      @default(now())
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
