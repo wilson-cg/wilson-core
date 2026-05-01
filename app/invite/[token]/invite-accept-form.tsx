@@ -3,22 +3,21 @@
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
-import { sendMagicLink } from "@/app/(auth)/login/actions";
+import {
+  sendMagicLink,
+  type SendMagicLinkState,
+} from "@/app/(auth)/login/actions";
 
-type State = { error?: string };
-
-async function submit(_prev: State, formData: FormData): Promise<State> {
-  try {
-    await sendMagicLink(formData);
-    return {};
-  } catch (e) {
-    if (isNextRedirect(e)) throw e;
-    return { error: e instanceof Error ? e.message : "Something went wrong." };
-  }
-}
+const INITIAL: SendMagicLinkState = { ok: null };
 
 export function InviteAcceptForm({ email }: { email: string }) {
-  const [state, action, pending] = useActionState<State, FormData>(submit, {});
+  const [state, action, pending] = useActionState<
+    SendMagicLinkState,
+    FormData
+  >(sendMagicLink, INITIAL);
+
+  const errorMessage =
+    state.ok === false && state.error ? state.error : null;
 
   return (
     <form action={action} className="space-y-3" noValidate>
@@ -37,12 +36,12 @@ export function InviteAcceptForm({ email }: { email: string }) {
         />
       </label>
 
-      {state.error ? (
+      {errorMessage ? (
         <p
           role="alert"
           className="rounded-[var(--radius-sm)] border border-[var(--color-raspberry)]/30 bg-[var(--color-raspberry)]/5 px-3 py-2 text-xs text-[var(--color-raspberry)]"
         >
-          {state.error}
+          {errorMessage}
         </p>
       ) : null}
 
@@ -57,10 +56,4 @@ export function InviteAcceptForm({ email }: { email: string }) {
       </Button>
     </form>
   );
-}
-
-function isNextRedirect(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const digest = (err as { digest?: unknown }).digest;
-  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
 }
