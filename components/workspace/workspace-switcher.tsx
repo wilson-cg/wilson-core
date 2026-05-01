@@ -11,6 +11,7 @@ import {
   Plus,
   Settings,
   Users,
+  UserPlus,
 } from "lucide-react";
 import { WorkspaceLogo } from "@/components/settings/workspace-logo";
 import { MarkW } from "@/components/brand/wordmark";
@@ -71,7 +72,10 @@ type PickerProps = CommonProps & {
 
 export function WorkspaceSwitcher(props: InWorkspaceProps | PickerProps) {
   const [open, setOpen] = useState(false);
-  const [membersOpen, setMembersOpen] = useState(false);
+  // null = closed; "invite"/"members" = which tab to open at.
+  const [membersTab, setMembersTab] = useState<
+    "invite" | "members" | "permissions" | "notifications" | null
+  >(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -162,7 +166,7 @@ export function WorkspaceSwitcher(props: InWorkspaceProps | PickerProps) {
                   type="button"
                   onClick={() => {
                     setOpen(false);
-                    setMembersOpen(true);
+                    setMembersTab("members");
                   }}
                   className="flex items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-xs font-medium text-[var(--color-charcoal-500)] shadow-[var(--shadow-soft)] hover:bg-[var(--color-virgil)] hover:text-[var(--color-charcoal)]"
                 >
@@ -259,13 +263,52 @@ export function WorkspaceSwitcher(props: InWorkspaceProps | PickerProps) {
 
       {isInWorkspace ? (
         <MembersModal
-          open={membersOpen}
-          onClose={() => setMembersOpen(false)}
+          open={membersTab !== null}
+          defaultTab={membersTab ?? "members"}
+          onClose={() => setMembersTab(null)}
           workspaceSlug={props.activeWorkspace.slug}
           viewerCanAdmin={props.viewerCanAdmin}
           members={props.members}
         />
       ) : null}
+    </>
+  );
+}
+
+/**
+ * Standalone "+ Share" button — placed in the top bar (admin-only) and
+ * opens the Members modal at the Invite tab. Forms its own island so the
+ * switcher dropdown state stays local.
+ */
+export function ShareButton({
+  workspaceSlug,
+  viewerCanAdmin,
+  members,
+}: {
+  workspaceSlug: string;
+  viewerCanAdmin: boolean;
+  members: MemberRow[];
+}) {
+  const [open, setOpen] = useState(false);
+  if (!viewerCanAdmin) return null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-forest)] px-3 py-1.5 text-xs font-semibold text-[var(--color-virgil)] shadow-[var(--shadow-soft)] hover:bg-[var(--color-forest-900)]"
+      >
+        <UserPlus className="h-3.5 w-3.5" />
+        Share
+      </button>
+      <MembersModal
+        open={open}
+        defaultTab="invite"
+        onClose={() => setOpen(false)}
+        workspaceSlug={workspaceSlug}
+        viewerCanAdmin={viewerCanAdmin}
+        members={members}
+      />
     </>
   );
 }

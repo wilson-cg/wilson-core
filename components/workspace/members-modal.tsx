@@ -41,18 +41,22 @@ type Tab = "invite" | "members" | "permissions" | "notifications";
 
 export function MembersModal({
   open,
+  defaultTab,
   onClose,
   workspaceSlug,
   viewerCanAdmin,
   members,
 }: {
   open: boolean;
+  defaultTab?: Tab;
   onClose: () => void;
   workspaceSlug: string;
   viewerCanAdmin: boolean;
   members: MemberRow[];
 }) {
-  const [tab, setTab] = useState<Tab>(viewerCanAdmin ? "invite" : "members");
+  const [tab, setTab] = useState<Tab>(
+    defaultTab ?? (viewerCanAdmin ? "invite" : "members")
+  );
 
   return (
     <Dialog open={open} onClose={onClose} title="Members" size="lg">

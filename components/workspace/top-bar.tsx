@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import {
   WorkspaceSwitcher,
+  ShareButton,
   type SwitcherWorkspace,
 } from "./workspace-switcher";
 import type { MemberRow } from "./members-modal";
@@ -86,6 +87,13 @@ export function WorkspaceTopBar({
           viewerCanAdmin={viewerCanAdmin}
           members={members}
         />
+        <div className="ml-auto">
+          <ShareButton
+            workspaceSlug={workspace.slug}
+            viewerCanAdmin={viewerCanAdmin}
+            members={members}
+          />
+        </div>
       </div>
 
       {/* Tab strip */}
