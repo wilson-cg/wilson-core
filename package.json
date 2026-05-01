@@ -9,6 +9,7 @@
     "lint": "next lint",
     "postinstall": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-v2": "npx tsx --env-file=.env prisma/seed-v2.ts",
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
     "db:bootstrap-admin": "tsx scripts/bootstrap-admin.ts"

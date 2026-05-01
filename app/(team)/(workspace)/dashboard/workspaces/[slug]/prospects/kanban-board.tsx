@@ -22,6 +22,7 @@ import { useState } from "react";
 
 export type StageKey =
   | "IDENTIFIED"
+  | "NEEDS_APPROVER_DECISION"
   | "DRAFTING"
   | "SENT"
   | "REPLIED"
@@ -30,6 +31,11 @@ export type StageKey =
 
 export const PIPELINE: { key: StageKey; label: string; match: string[] }[] = [
   { key: "IDENTIFIED", label: "Identified", match: ["IDENTIFIED"] },
+  {
+    key: "NEEDS_APPROVER_DECISION",
+    label: "Needs decision",
+    match: ["NEEDS_APPROVER_DECISION"],
+  },
   {
     key: "DRAFTING",
     label: "Drafting",
@@ -49,13 +55,13 @@ export type KanbanProspect = {
   company: string;
   title: string | null;
   status: string;
-  fitScore: "STRONG" | "POSSIBLE" | "NOT_A_FIT";
-  updatedAt: string; // ISO
+  icpScore: number;
+  signalType: string | null;
+  approverDecision: "PENDING" | "APPROVED" | "DECLINED";
+  updatedAt: string;
   assigneeName: string | null;
   lastMessageStatus: string | null;
 };
-
-/* ─── Reducer helper ─────────────────────────────────────────── */
 
 type OptimisticMove = { id: string; stage: StageKey };
 
@@ -78,6 +84,8 @@ function stageToCanonicalStatus(stage: StageKey): string {
   switch (stage) {
     case "IDENTIFIED":
       return "IDENTIFIED";
+    case "NEEDS_APPROVER_DECISION":
+      return "NEEDS_APPROVER_DECISION";
     case "DRAFTING":
       return "MESSAGE_DRAFTED";
     case "SENT":
@@ -121,7 +129,7 @@ export function KanbanBoard({
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 }, // small drag threshold so clicks still work
+      activationConstraint: { distance: 5 },
     })
   );
 
@@ -198,20 +206,14 @@ export function KanbanBoard({
         </div>
       </div>
 
-      {/* Drag preview */}
       <DragOverlay>
         {draggingRef.current ? (
-          <CardContent
-            prospect={draggingRef.current}
-            dragging
-          />
+          <CardContent prospect={draggingRef.current} dragging />
         ) : null}
       </DragOverlay>
     </DndContext>
   );
 }
-
-/* ─── Column (droppable) ────────────────────────────────────── */
 
 function Column({
   id,
@@ -272,8 +274,6 @@ function EmptySlot() {
   );
 }
 
-/* ─── Draggable card ────────────────────────────────────────── */
-
 function DraggableCard({
   prospect,
   slug,
@@ -330,9 +330,19 @@ function CardContent({
         {prospect.company}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1">
-        <Badge variant={fitBadge(prospect.fitScore)}>
-          {humanizeFit(prospect.fitScore)}
+        <Badge variant={icpBadge(prospect.icpScore)}>
+          ICP {prospect.icpScore}/4
         </Badge>
+        {prospect.signalType ? (
+          <span className="inline-flex items-center rounded-full border bg-[var(--color-virgil)] px-2 py-px text-[10px] text-[var(--color-charcoal-500)]">
+            {humanSignal(prospect.signalType)}
+          </span>
+        ) : null}
+        {prospect.approverDecision === "APPROVED" ? (
+          <Badge variant="approved">Approved</Badge>
+        ) : prospect.approverDecision === "DECLINED" ? (
+          <Badge variant="rejected">Declined</Badge>
+        ) : null}
         {prospect.lastMessageStatus ? (
           <Badge variant={msgBadge(prospect.lastMessageStatus)}>
             {humanizeMsg(prospect.lastMessageStatus)}
@@ -353,11 +363,11 @@ function CardContent({
   );
 }
 
-/* ─── Styling helpers ──────────────────────────────────────── */
-
 function columnTone(key: StageKey): string {
   const map: Record<StageKey, string> = {
     IDENTIFIED: "bg-[var(--color-virgil-dark)] text-[var(--color-charcoal)]",
+    NEEDS_APPROVER_DECISION:
+      "bg-[var(--color-grapefruit)]/30 text-[var(--color-charcoal)]",
     DRAFTING: "bg-[var(--color-bee)]/40 text-[var(--color-charcoal)]",
     SENT: "bg-[var(--color-teal)]/50 text-[var(--color-forest-950)]",
     REPLIED: "bg-[var(--color-aperol)]/25 text-[var(--color-charcoal)]",
@@ -380,7 +390,10 @@ function columnStat(
 ): string | null {
   const denom = ctx.totalSent + ctx.replied + ctx.meetings + ctx.notInterested;
   if (key === "SENT" && ctx.totalSent > 0) {
-    const reach = denom > 0 ? Math.round(((ctx.replied + ctx.meetings) / denom) * 100) : 0;
+    const reach =
+      denom > 0
+        ? Math.round(((ctx.replied + ctx.meetings) / denom) * 100)
+        : 0;
     return `${reach}% reply rate overall`;
   }
   if (key === "REPLIED" && denom > 0) {
@@ -395,16 +408,17 @@ function columnStat(
   return null;
 }
 
-function fitBadge(s: string) {
-  if (s === "STRONG") return "approved" as const;
-  if (s === "NOT_A_FIT") return "rejected" as const;
-  return "drafted" as const;
+function icpBadge(score: number) {
+  if (score >= 4) return "approved" as const;
+  if (score >= 2) return "drafted" as const;
+  return "rejected" as const;
 }
 
-function humanizeFit(s: string) {
-  if (s === "STRONG") return "Strong fit";
-  if (s === "NOT_A_FIT") return "Not a fit";
-  return "Possible fit";
+function humanSignal(s: string) {
+  return s
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/^./, (c) => c.toUpperCase());
 }
 
 function msgBadge(s: string) {

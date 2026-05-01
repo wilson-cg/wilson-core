@@ -15,7 +15,17 @@ type Props = {
   location: string | null;
   linkedinUrl: string;
   tags: string | null;
-  fitScore: "STRONG" | "POSSIBLE" | "NOT_A_FIT";
+  signalType:
+    | "REACTION"
+    | "COMMENT"
+    | "CONNECTION_REQUEST"
+    | "POST"
+    | "REPEATED_ENGAGEMENT"
+    | "CUSTOM"
+    | null;
+  signalContext: string | null;
+  messageAngle: string | null;
+  approverNotes: string | null;
   notes: string | null;
 };
 
@@ -93,16 +103,43 @@ export function EditInfoIsland(props: Props) {
           <Field label="Tags (comma separated)">
             <Input name="tags" defaultValue={props.tags ?? ""} />
           </Field>
-          <Field label="ICP fit">
+          <Field label="Signal type">
             <select
-              name="fitScore"
-              defaultValue={props.fitScore}
+              name="signalType"
+              defaultValue={props.signalType ?? ""}
               className="h-10 w-full rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-sm shadow-[var(--shadow-soft)]"
             >
-              <option value="STRONG">Strong fit</option>
-              <option value="POSSIBLE">Possible fit</option>
-              <option value="NOT_A_FIT">Not a fit</option>
+              <option value="">—</option>
+              <option value="REACTION">Reaction</option>
+              <option value="COMMENT">Comment</option>
+              <option value="CONNECTION_REQUEST">Connection request</option>
+              <option value="POST">Post</option>
+              <option value="REPEATED_ENGAGEMENT">Repeated engagement</option>
+              <option value="CUSTOM">Custom</option>
             </select>
+          </Field>
+          <Field label="Signal context">
+            <textarea
+              name="signalContext"
+              rows={2}
+              defaultValue={props.signalContext ?? ""}
+              className="w-full rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-sm shadow-[var(--shadow-soft)]"
+            />
+          </Field>
+          <Field label="Message angle">
+            <Input
+              name="messageAngle"
+              defaultValue={props.messageAngle ?? ""}
+              placeholder="keep casual / met him at an event / etc."
+            />
+          </Field>
+          <Field label="Approver notes">
+            <textarea
+              name="approverNotes"
+              rows={2}
+              defaultValue={props.approverNotes ?? ""}
+              className="w-full rounded-[var(--radius-md)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-sm shadow-[var(--shadow-soft)]"
+            />
           </Field>
           <Field label="Internal notes">
             <textarea

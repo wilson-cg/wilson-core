@@ -1,7 +1,63 @@
 # Wilson's Client Portal — Agent Handoff
 
 > Comprehensive onboarding doc for any agent (or human) picking this project up
-> mid-flight. Last updated 27 April 2026.
+> mid-flight. Last updated 29 April 2026.
+
+---
+
+## V1 pivot (2026-04-30)
+
+The 2026-04-30 client meeting reset scope: **the client keeps Plannable for
+content** and asked us to focus on what's actually missing — **intent tracking**.
+The product is now a workspace-scoped pipeline of LinkedIn engagement signals
+worked through a manual approval flow, used by 3 client teams (Joe, Graham,
+Richard). Same view for everyone — no client-vs-agency split for prospects in
+V1.
+
+**What's hidden (not deleted)**
+- Workspace sidebar drops the Content + Approvals nav. Adds Archive.
+- `/dashboard/workspaces/[slug]` redirects to `/prospects` (was `/content`).
+- `/dashboard/workspaces/[slug]/content/*` routes redirect to `/prospects`
+  with a `// HIDDEN-V1` comment marker. Components, queries, harper.js
+  wiring, and the `/dashboard/approvals` cross-workspace queue stay intact;
+  revive when Plannable replacement is V2.
+- `/client/dashboard` (the LinkedIn-feed approval cards) bounces CLIENTs to
+  their first workspace's `/prospects`.
+
+**Schema additions (migration `4_intent_tracking_pivot`)**
+
+New columns on `Prospect`:
+- `signalType` (`SignalType?` — `REACTION | COMMENT | CONNECTION_REQUEST | POST | REPEATED_ENGAGEMENT | CUSTOM`)
+- `signalContext` (`String?`)
+- 4 ICP booleans: `icpCompanyFit`, `icpSeniorityFit`, `icpContextFit`, `icpGeographyFit`
+- `icpScore` (0–4, recomputed in app on every flip)
+- `approverDecision` (`PENDING | APPROVED | DECLINED`)
+- `messageAngle` (`String?`)
+- `approverNotes` (`String?`) — separate from internal `notes`
+- `archived` (`Boolean`)
+
+`fitScore` + `FitScore` enum dropped. The migration backfills the booleans
+from the old enum: `STRONG → all 4 + score 4`, `POSSIBLE → company+seniority + score 2`,
+`NOT_A_FIT → all false + score 0`.
+
+`ProspectStatus` gains `NEEDS_APPROVER_DECISION` between `IDENTIFIED` and
+`MESSAGE_DRAFTED`.
+
+**New stages on the Kanban**: Identified → Needs decision → Drafting → Sent →
+Replied → Meeting booked → Not interested. Nurture pool stays separate.
+
+**Coresignal LinkedIn auto-fill** — `lib/coresignal.ts` calls the Base Employee
+API collect endpoint (`https://api.coresignal.com/cdapi/v2/employee_base/collect/{shorthand}`,
+`apikey` header). 1 credit per lookup, no free tier. Wired from a button on
+the new-prospect form. `CORESIGNAL_API_KEY` is in `.env.example`. Rate-limited
+per URL via the existing token limiter.
+
+**Seed wipe** — `npm run db:seed-v2` runs `prisma/seed-v2.ts`, which preserves
+`marketing@wilson-cg.com` + `stan@wilson-cg.com` and wipes everyone/everything
+else, then creates 3 fresh workspaces (Joe / Graham / Richard) with default
+onboarding questions and ADMIN memberships for both preserved admins. No
+prospects / messages / posts seeded — clean pipelines for the live demo.
+Already executed once against Railway prod (`shuttle.proxy.rlwy.net:43333`).
 
 ---
 
