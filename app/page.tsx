@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Plus, Star, History } from "lucide-react";
+import { Plus, Star } from "lucide-react";
 import { currentUser } from "@/lib/auth";
 import { workspacePickerCards } from "@/lib/queries";
 import { Wordmark } from "@/components/brand/wordmark";
 import { WorkspaceLogo } from "@/components/settings/workspace-logo";
-import { logout } from "@/app/(auth)/login/actions";
 import { Button } from "@/components/ui/button";
+import { PickerHeader } from "@/components/workspace/picker-header";
 
 /**
  * Workspace picker home (V1 UX overhaul, 2026-05-01).
@@ -38,27 +38,7 @@ export default async function PickerHome() {
           <Link href="/" className="inline-flex items-center">
             <Wordmark tone="forest" className="h-7" />
           </Link>
-          <div className="flex items-center gap-3">
-            {user.role === "ADMIN" ? (
-              <Link
-                href="/dashboard/audit"
-                className="inline-flex items-center gap-1 text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-forest)]"
-              >
-                <History className="h-3.5 w-3.5" /> Audit log
-              </Link>
-            ) : null}
-            <span className="text-xs text-[var(--color-muted-foreground)]">
-              {user.name.split(" ")[0]}
-            </span>
-            <form action={logout}>
-              <button
-                type="submit"
-                className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs text-[var(--color-charcoal-300)] shadow-[var(--shadow-soft)] hover:bg-[var(--color-virgil)] hover:text-[var(--color-raspberry)]"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
+          <PickerHeader user={user} />
         </div>
       </header>
 
@@ -117,16 +97,17 @@ function WorkspaceCard({ card }: { card: Card }) {
             accentColor={card.accentColor}
             size="lg"
           />
-          {/* Disabled favourites toggle — visual placeholder for V2 */}
-          <button
-            type="button"
+          {/* Disabled favourites toggle — visual placeholder for V2.
+              Rendered as a span (not a button) because this lives in a server
+              component and onClick handlers can't cross the RSC boundary.
+              The wrapping <Link> swallows clicks anyway. */}
+          <span
             aria-label="Star (coming soon)"
-            disabled
-            onClick={(e) => e.preventDefault()}
+            aria-disabled
             className="shrink-0 rounded-md p-1 text-[var(--color-charcoal-200)]"
           >
             <Star className="h-4 w-4" />
-          </button>
+          </span>
         </div>
 
         <div className="mt-3 min-w-0">
