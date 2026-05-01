@@ -322,17 +322,19 @@ function CardContent({
           : ""
       }
     >
-      <div className="text-sm font-semibold leading-tight text-[var(--color-forest)]">
-        {prospect.fullName}
-      </div>
-      <div className="mt-0.5 truncate text-xs text-[var(--color-muted-foreground)]">
-        {prospect.title ? `${prospect.title} · ` : ""}
-        {prospect.company}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold leading-tight text-[var(--color-forest)]">
+            {prospect.fullName}
+          </div>
+          <div className="mt-0.5 truncate text-xs text-[var(--color-muted-foreground)]">
+            {prospect.title ? `${prospect.title} · ` : ""}
+            {prospect.company}
+          </div>
+        </div>
+        <IcpPill score={prospect.icpScore} />
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1">
-        <Badge variant={icpBadge(prospect.icpScore)}>
-          ICP {prospect.icpScore}/4
-        </Badge>
         {prospect.signalType ? (
           <span className="inline-flex items-center rounded-full border bg-[var(--color-virgil)] px-2 py-px text-[10px] text-[var(--color-charcoal-500)]">
             {humanSignal(prospect.signalType)}
@@ -360,6 +362,36 @@ function CardContent({
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * ICP pill — top-right corner of every Kanban card. Color scale uses only
+ * existing brand vars (V1 UX overhaul, 2026-05-01):
+ *   4/4 → forest bg, lime text     (strong fit)
+ *   3/4 → forest outline, forest text
+ *   2/4 → bee bg
+ *   1/4 → grapefruit bg
+ *   0/4 → charcoal-300 bg, muted text
+ */
+function IcpPill({ score }: { score: number }) {
+  const cls =
+    score >= 4
+      ? "bg-[var(--color-forest)] text-[var(--color-lime)]"
+      : score === 3
+        ? "border border-[var(--color-forest)] bg-[var(--color-surface)] text-[var(--color-forest)]"
+        : score === 2
+          ? "bg-[var(--color-bee)] text-[var(--color-charcoal)]"
+          : score === 1
+            ? "bg-[var(--color-grapefruit)] text-[var(--color-charcoal)]"
+            : "bg-[var(--color-charcoal-200)] text-[var(--color-charcoal-500)]";
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ${cls}`}
+      title={`ICP fit ${score}/4`}
+    >
+      {score}/4
+    </span>
   );
 }
 
@@ -406,12 +438,6 @@ function columnStat(
     return `${Math.round((ctx.notInterested / denom) * 100)}% lost`;
   }
   return null;
-}
-
-function icpBadge(score: number) {
-  if (score >= 4) return "approved" as const;
-  if (score >= 2) return "drafted" as const;
-  return "rejected" as const;
 }
 
 function humanSignal(s: string) {

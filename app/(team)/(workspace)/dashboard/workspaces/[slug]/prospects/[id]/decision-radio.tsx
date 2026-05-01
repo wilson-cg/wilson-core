@@ -26,14 +26,17 @@ const OPTIONS: { value: Decision; label: string; tone: string }[] = [
 export function DecisionRadio({
   prospectId,
   initial,
+  canEdit = true,
 }: {
   prospectId: string;
   initial: Decision;
+  canEdit?: boolean;
 }) {
   const [optimistic, setOptimistic] = useOptimistic(initial);
   const [, startTransition] = useTransition();
 
   function pick(value: Decision) {
+    if (!canEdit) return;
     if (value === optimistic) return;
     startTransition(() => {
       setOptimistic(value);
@@ -59,11 +62,12 @@ export function DecisionRadio({
               key={o.value}
               type="button"
               onClick={() => pick(o.value)}
+              disabled={!canEdit}
               className={`rounded-[var(--radius-sm)] border px-2 py-1.5 text-xs font-medium transition-colors ${
                 active
                   ? o.tone
                   : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-charcoal-500)] hover:border-[var(--color-border-strong)]"
-              }`}
+              } ${!canEdit ? "cursor-not-allowed opacity-70" : ""}`}
               aria-pressed={active}
             >
               {o.label}
