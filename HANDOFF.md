@@ -1,7 +1,71 @@
 # Wilson's Client Portal — Agent Handoff
 
 > Comprehensive onboarding doc for any agent (or human) picking this project up
-> mid-flight. Last updated 29 April 2026.
+> mid-flight. Last updated 1 May 2026.
+
+---
+
+## V1 UX overhaul rev 2 (2026-05-01)
+
+PR #4 ("Plannable-style UX overhaul", `feat/plannable-style-ux`) shipped the
+workspace picker home, top-bar workspace switcher, members modal, granular
+permissions, and the 5-section CSV-aligned prospect detail. After merging,
+Railway prod returned `Application error: server-side exception` for any
+authenticated user hitting `/`. The merge was reverted on `main` (commit
+`35b8abe`), but the granular-permissions migration (`5_granular_permissions`)
+was already applied to the prod DB and stayed in place.
+
+**Root cause of the picker crash**
+
+```
+Error: Event handlers cannot be passed to Client Component props.
+<button type="button" aria-label=... disabled=... onClick={function onClick} ...>
+```
+
+`app/page.tsx` rendered a disabled "favourites star" button with an inline
+`onClick={(e) => e.preventDefault()}` handler in a Server Component context.
+Functions can't cross the RSC boundary, so every render threw and Next.js
+served a 500. There was no `app/error.tsx`, so the error bubbled to the
+default 500 page (which Railway shows as "Application error: server-side
+exception"). Fixed by replacing with a non-interactive `<span aria-disabled>`
+plus adding `app/error.tsx` and `app/global-error.tsx` so future server-side
+exceptions render a friendly fallback and surface in Railway logs + Sentry.
+
+**Login form red-error bug**
+
+The login form showed a red box ("An error occurred in the Server Components
+render. The specific message is omitted in production builds…") even though
+the magic-link flow worked end-to-end (VerificationToken row created, email
+sent, redirect to `/login/check-email`). Cause: `signIn("resend")` throws
+`NEXT_REDIRECT` on the success path, and `useActionState`'s wrapper
+treated that digest as an error. Fixed by switching `sendMagicLink` to a
+proper `useActionState` action signature (`(prevState, formData) =>
+SendMagicLinkState`), passing `redirect: false` to `signIn` so it doesn't
+throw, then calling `redirect("/login/check-email")` from the action itself.
+
+**Dropdown overhaul**
+
+The original PR #4 in-workspace top bar had a switcher dropdown plus
+separate Members + Settings buttons in the right rail. The new reference
+screenshot folds everything into a single Plannable-style popover:
+
+- Top section: Wilson's wordmark + viewer first name
+- Settings and Members buttons (in-workspace context only)
+- Workspace list with all accessible workspaces, checkmark on the active one,
+  "+ New workspace" as the last item (ADMIN only)
+- Footer: Audit log (ADMIN only) and Sign out (with viewer avatar)
+
+Single shared component (`components/workspace/workspace-switcher.tsx`)
+renders both contexts ("picker" — no active workspace — and "in-workspace").
+The picker page wraps it in `<PickerHeader>` (server component that loads
+the workspaces list) so `app/page.tsx` stays a pure Server Component.
+
+**Branch / PR**
+
+- Branch: `feat/plannable-ux-v2` (built on top of `feat/plannable-style-ux`).
+- 7 PR #4 commits preserved as-is + 3 fix commits on top.
+- No new DB migration needed — `5_granular_permissions` is already applied
+  in prod.
 
 ---
 
@@ -783,6 +847,107 @@ the next Railway boot will apply them.
 **Do NOT run `prisma migrate dev` against Railway prod** — it can rewrite history.
 Use `migrate dev` only against a local/scratch DB; commit the generated SQL; let
 prod pick it up via `migrate deploy`.
+
+---
+
+## V1 UX overhaul (2026-05-01)
+
+Plannable-style workspace picker + granular per-action permissions. PR
+follow-up to the intent-tracking pivot. All five pieces shipped together:
+
+### Workspace picker home page (`app/page.tsx`)
+
+After login, every user lands on a Plannable-style grid of workspace cards
+instead of role-based redirects to `/dashboard` or `/client/dashboard`.
+Each card shows: avatar, workspace name, **N awaiting your decision**,
+**M total prospects**, **Avg ICP score: X.Y / 4**, last-activity timestamp,
+and the first three member avatars. Click anywhere to enter the workspace.
+Backed by `workspacePickerCards()` in `lib/queries.ts`.
+
+### Top-bar workspace switcher + tabs subnav
+
+The cross-workspace sidebar inside `app/(team)/(workspace)/dashboard/workspaces/[slug]/layout.tsx` is gone. Replaced with `<WorkspaceTopBar>` (in
+`components/workspace/top-bar.tsx`):
+- Left: ← All clients link back to the picker home
+- Center: workspace dropdown (lists user's other accessible workspaces)
+- Right: Members button (avatar overlap → modal) + settings cog
+- Below: tab strip (Prospects / Archive / ICP reference / Settings)
+
+### Granular permissions matrix
+
+New columns on `Membership` (and same on `Invite` /
+`InviteWorkspaceAccess`): `canApprove`, `canEdit`, `canSend`, `canAdmin`.
+`canView` is implicit on every Membership. Backfill rules in migration
+`5_granular_permissions`:
+- ADMIN / TEAM_MEMBER memberships → all four flags true
+- CLIENT memberships → canApprove only
+
+System ADMINs always bypass via `lib/permissions.ts`. Helpers:
+- `canPerformInWorkspace(user, workspaceId, action)` — boolean
+- `requirePermission(user, workspaceId, action)` — throws
+- `permissionsForWorkspace(user, workspaceId)` — full snapshot for islands
+- `defaultFlagsForSystemRole(systemRole)` — invite preset
+
+Server actions in `lib/actions.ts` call `requirePermission` at the top:
+- `addProspect`, `updateProspectInfo`, `archiveProspect`, `unarchiveProspect`,
+  `updateDraft`, `submitForApproval`, `draftMessage` → `edit`
+- `setIcpField`, `setApproverDecision`, `approveMessage`, `editAndApprove`,
+  `rejectMessage` → `approve`
+- `markAsSent`, `markAsReplied`, `markMeetingBooked`,
+  `updateProspectContactDates`, `logProspectActivity` → `send`
+- `moveProspectToStage` — gated per-target-stage (approve/edit/send)
+- `requireWorkspaceWriteAccess` (workspace settings, contacts, onboarding,
+  members, deletion) → `admin`
+
+### Members modal (`components/workspace/members-modal.tsx`)
+
+Triggered from the top-bar avatar overlap. Four tabs:
+- **Invite** (admin) — email + system role + permission preset (Client /
+  Team / Custom). Wires to `inviteToWorkspace` which now accepts the four
+  flags + a system role.
+- **Members** — list of memberships with role chip + Remove (admin only).
+- **Permissions** (admin) — checkbox matrix: View (locked) / Approve /
+  Edit / Send / Admin. Each toggle fires `updateMembershipPermissions`
+  immediately.
+- **Notifications** — per-member "email me when prospects need approval"
+  toggle (writes to new `Membership.notifyOnApprovalRequested` column).
+
+New invites bake the permission preset into the Invite row; the
+`events.createUser` callback in `lib/auth.ts` applies those flags to the
+resulting Membership row at first sign-in.
+
+### 5-section CSV-aligned prospect detail page
+
+`app/(team)/(workspace)/dashboard/workspaces/[slug]/prospects/[id]/page.tsx`
+now has 5 sections matching the CSV column groups:
+1. CAPTURE — name, LinkedIn, title, company, signal type + context
+2. ICP FIT — big 64px score ring + 4 toggles (gated on `canApprove`)
+3. DECISION — approver decision radio + message angle + approver notes
+   (gated on `canApprove`)
+4. MESSAGE — existing thread (gated on `canEdit` / `canSend` per action)
+5. OUTCOME — replied / sent / meeting / contacted dates (gated on `canSend`)
+
+`IcpWidget` got a 4-segment SVG ring (segments filled = score) on the left
+of the toggles. Forest fills, virgil-dark unfilled.
+
+### ICP visual prominence
+
+The ICP score is the load-bearing data point in the meeting. Three places
+got prominence:
+1. **Picker cards** — third metric line "Avg ICP score: X.Y / 4" (skipped
+   if 0 prospects).
+2. **Kanban cards** — `IcpPill` in the top-right corner of every card.
+   Color scale (existing brand vars only): 4/4 forest+lime, 3/4 forest
+   outline, 2/4 bee, 1/4 grapefruit, 0/4 charcoal-300.
+3. **Prospect detail** — 64px score ring with thin progress arcs to the
+   left of the 4 ICP toggles. Re-renders optimistically on each click.
+
+### Default permission presets (Client = view+approve; Team = full)
+
+The Members modal's "Client" preset = canApprove only. The "Team" preset =
+all four flags. "Custom" exposes the four checkboxes directly. Same defaults
+applied by the migration backfill, by `events.createUser` when an invite is
+accepted, and by `defaultFlagsForSystemRole`.
 
 ---
 
