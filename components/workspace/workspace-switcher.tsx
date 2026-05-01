@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { WorkspaceLogo } from "@/components/settings/workspace-logo";
 import { MarkW } from "@/components/brand/wordmark";
-import { MembersModal, type MemberRow } from "./members-modal";
+import { MembersModal, type ModalMembers } from "./members-modal";
 import { logout } from "@/app/(auth)/login/actions";
 
 /**
@@ -62,7 +62,7 @@ type CommonProps = {
 type InWorkspaceProps = CommonProps & {
   context: "in-workspace";
   activeWorkspace: SwitcherWorkspace;
-  members: MemberRow[];
+  members: ModalMembers;
   viewerCanAdmin: boolean;
 };
 
@@ -287,7 +287,7 @@ export function ShareButton({
 }: {
   workspaceSlug: string;
   viewerCanAdmin: boolean;
-  members: MemberRow[];
+  members: ModalMembers;
 }) {
   const [open, setOpen] = useState(false);
   if (!viewerCanAdmin) return null;

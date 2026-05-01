@@ -304,22 +304,34 @@ export async function workspaceSettings(workspaceId: string) {
  * row (name, email, image), plus the permission flag set.
  */
 export async function workspaceMembersForModal(workspaceId: string) {
-  const memberships = await prisma.membership.findMany({
-    where: { workspaceId },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          image: true,
-          role: true,
+  const [memberships, invites] = await Promise.all([
+    prisma.membership.findMany({
+      where: { workspaceId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            role: true,
+          },
         },
       },
-    },
-    orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-  });
-  return memberships.map((m) => ({
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+    }),
+    prisma.invite.findMany({
+      where: {
+        workspaceId,
+        acceptedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  const members = memberships.map((m) => ({
+    kind: "member" as const,
     membershipId: m.id,
     userId: m.user.id,
     name: m.user.name ?? m.user.email,
@@ -327,12 +339,37 @@ export async function workspaceMembersForModal(workspaceId: string) {
     image: m.user.image,
     systemRole: m.user.role,
     workspaceRole: m.role,
+    isWorkspaceOwner: m.isWorkspaceOwner,
     canApprove: m.canApprove,
     canEdit: m.canEdit,
     canSend: m.canSend,
     canAdmin: m.canAdmin,
     notifyOnApprovalRequested: m.notifyOnApprovalRequested,
+    notifyOnNewProspect: m.notifyOnNewProspect,
+    notifyOnStatusChange: m.notifyOnStatusChange,
+    notifyOnComment: m.notifyOnComment,
+    createdAt: m.createdAt,
   }));
+
+  const pending = invites.map((i) => ({
+    kind: "invite" as const,
+    inviteId: i.id,
+    email: i.email,
+    systemRole: i.systemRole,
+    workspaceRole: i.workspaceRole,
+    canApprove: i.canApprove,
+    canEdit: i.canEdit,
+    canSend: i.canSend,
+    canAdmin: i.canAdmin,
+    notifyOnApprovalRequested: false, // Invite has no notifyOnApprovalRequested column; matrix renders read-only
+    notifyOnNewProspect: i.notifyOnNewProspect,
+    notifyOnStatusChange: i.notifyOnStatusChange,
+    notifyOnComment: i.notifyOnComment,
+    createdAt: i.createdAt,
+    expiresAt: i.expiresAt,
+  }));
+
+  return { members, pending };
 }
 
 /** Team members (non-client) who have access to this workspace. */

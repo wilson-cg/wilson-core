@@ -8,7 +8,7 @@ import {
   ShareButton,
   type SwitcherWorkspace,
 } from "./workspace-switcher";
-import type { MemberRow } from "./members-modal";
+import type { ModalMembers } from "./members-modal";
 
 /**
  * In-workspace top bar (V1 UX overhaul rev 2).
@@ -32,7 +32,7 @@ export function WorkspaceTopBar({
 }: {
   workspace: TopBarWorkspace;
   workspaces: TopBarWorkspace[];
-  members: MemberRow[];
+  members: ModalMembers;
   viewer: {
     name: string;
     email: string;
